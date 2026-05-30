@@ -84,59 +84,34 @@
       return (
         <div style={{ minHeight: "100vh", background: "var(--paper)", display: "flex", flexDirection: "column" }}>
           <style>{`
-            .login-header {
-              border-bottom: 1px solid var(--rule);
-              padding: 16px 20px 12px;
-            }
+            .login-header { border-bottom: 1px solid var(--rule); padding: 16px 20px 12px; }
             .wordmark {
-              font-family: 'Lora', serif;
-              font-size: 13px; font-weight: 600;
-              letter-spacing: 0.15em; text-transform: uppercase;
-              color: var(--ink);
+              font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
+              letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
             }
-            .login-body {
-              flex: 1; display: flex; align-items: center; justify-content: center;
-              padding: 40px 20px;
-            }
-            .login-card {
-              width: 100%; max-width: 360px; text-align: center;
-            }
-            .login-title {
-              font-family: 'Lora', serif; font-size: 20px; font-weight: 500;
-              color: var(--ink); margin-bottom: 10px;
-            }
+            .login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+            .login-card { width: 100%; max-width: 360px; text-align: center; }
+            .login-title { font-family: 'Lora', serif; font-size: 20px; font-weight: 500; color: var(--ink); margin-bottom: 10px; }
             .login-sub {
               font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.04em; line-height: 1.7;
-              margin-bottom: 32px;
+              color: var(--ink-faint); letter-spacing: 0.04em; line-height: 1.7; margin-bottom: 32px;
             }
             .login-btn {
               font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
               letter-spacing: 0.1em; text-transform: uppercase;
               color: var(--paper); background: var(--ink); border: none; cursor: pointer;
-              padding: 14px 32px; width: 100%;
-              transition: background 0.15s;
+              padding: 14px 32px; width: 100%; transition: background 0.15s;
             }
             .login-btn:hover { background: #2d2d2a; }
             .login-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
-            .login-sent {
-              font-family: 'Lora', serif; font-size: 15px; font-style: italic;
-              color: var(--ink-light); line-height: 1.8;
-            }
+            .login-sent { font-family: 'Lora', serif; font-size: 15px; font-style: italic; color: var(--ink-light); line-height: 1.8; }
             .login-sent-mono {
               font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.04em; margin-top: 16px;
-              display: block;
+              color: var(--ink-faint); letter-spacing: 0.04em; margin-top: 16px; display: block;
             }
-            .login-error {
-              font-family: 'DM Mono', monospace; font-size: 11px;
-              color: var(--accent); letter-spacing: 0.03em;
-              margin-top: 16px;
-            }
+            .login-error { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 0.03em; margin-top: 16px; }
           `}</style>
-          <div className="login-header">
-            <span className="wordmark">Log</span>
-          </div>
+          <div className="login-header"><span className="wordmark">Log</span></div>
           <div className="login-body">
             <div className="login-card">
               {sent ? (
@@ -147,9 +122,7 @@
               ) : (
                 <>
                   <div className="login-title">Sign in</div>
-                  <div className="login-sub">
-                    A sign-in link will be sent<br />to {OWNER_EMAIL}
-                  </div>
+                  <div className="login-sub">A sign-in link will be sent<br />to {OWNER_EMAIL}</div>
                   <button className="login-btn" onClick={sendLink} disabled={sending}>
                     {sending ? "Sending..." : "Send sign-in link"}
                   </button>
@@ -174,28 +147,45 @@
       const [now, setNow] = useState(new Date());
       const [justAdded, setJustAdded] = useState(null);
       const [view, setView] = useState("log");
+      const [filterOpen, setFilterOpen] = useState(false);
+      const [filterText, setFilterText] = useState("");
+      const [filterLocation, setFilterLocation] = useState("");
+      const [filterDateFrom, setFilterDateFrom] = useState("");
+      const [filterDateTo, setFilterDateTo] = useState("");
       const textRef = useRef(null);
+
+      const hasActiveFilters = !!(filterText || filterLocation || filterDateFrom || filterDateTo);
+
+      const filteredEntries = entries.filter(entry => {
+        if (filterText && !entry.text.toLowerCase().includes(filterText.toLowerCase())) return false;
+        if (filterLocation && !(entry.location || "").toLowerCase().includes(filterLocation.toLowerCase())) return false;
+        if (filterDateFrom) {
+          const from = new Date(filterDateFrom); from.setHours(0, 0, 0, 0);
+          if (new Date(entry.timestamp) < from) return false;
+        }
+        if (filterDateTo) {
+          const to = new Date(filterDateTo); to.setHours(23, 59, 59, 999);
+          if (new Date(entry.timestamp) > to) return false;
+        }
+        return true;
+      });
+
+      function clearFilters() {
+        setFilterText(""); setFilterLocation(""); setFilterDateFrom(""); setFilterDateTo("");
+      }
 
       useEffect(() => {
         db.auth.getSession().then(({ data: { session } }) => {
           if (session && session.user.email !== OWNER_EMAIL) {
-            db.auth.signOut();
-            setSession(null);
-          } else {
-            setSession(session);
-          }
+            db.auth.signOut(); setSession(null);
+          } else { setSession(session); }
           setAuthLoading(false);
         });
-
         const { data: { subscription } } = db.auth.onAuthStateChange((_event, session) => {
           if (session && session.user.email !== OWNER_EMAIL) {
-            db.auth.signOut();
-            setSession(null);
-          } else {
-            setSession(session);
-          }
+            db.auth.signOut(); setSession(null);
+          } else { setSession(session); }
         });
-
         return () => subscription.unsubscribe();
       }, []);
 
@@ -207,10 +197,7 @@
       useEffect(() => {
         if (!session) return;
         async function fetchEntries() {
-          const { data, error } = await db
-            .from("entries")
-            .select("*")
-            .order("timestamp", { ascending: false });
+          const { data, error } = await db.from("entries").select("*").order("timestamp", { ascending: false });
           if (!error) setEntries(data || []);
           setLoading(false);
         }
@@ -218,10 +205,7 @@
       }, [session]);
 
       function getLocation() {
-        if (!navigator.geolocation) {
-          setLocation("Geolocation not supported");
-          return;
-        }
+        if (!navigator.geolocation) { setLocation("Geolocation not supported"); return; }
         setLocLoading(true);
         navigator.geolocation.getCurrentPosition(
           async pos => {
@@ -236,14 +220,11 @@
               const place = addr.suburb || addr.neighbourhood || addr.quarter || addr.city_district || addr.city || addr.town || addr.village || "";
               const city = addr.city || addr.town || addr.county || "";
               setLocation(place && city && place !== city ? `${place}, ${city}` : place || city || `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
-            } catch {
-              setLocation(`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
-            }
+            } catch { setLocation(`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`); }
             setLocLoading(false);
           },
           err => {
-            const msg = err.code === 1 ? "Location access denied" : "Could not get location";
-            setLocation(msg);
+            setLocation(err.code === 1 ? "Location access denied" : "Could not get location");
             setLocLoading(false);
           },
           { timeout: 10000, maximumAge: 60000 }
@@ -255,19 +236,14 @@
         setSaving(true);
         const timestamp = new Date().toISOString();
         const { data, error } = await db
-          .from("entries")
-          .insert({ timestamp, text: text.trim(), location: location.trim() })
-          .select()
-          .single();
+          .from("entries").insert({ timestamp, text: text.trim(), location: location.trim() })
+          .select().single();
         if (!error && data) {
           setEntries(prev => [data, ...prev]);
           setJustAdded(data.id);
           setTimeout(() => setJustAdded(null), 2000);
         }
-        setText("");
-        setLocation("");
-        setView("log");
-        setSaving(false);
+        setText(""); setLocation(""); setView("log"); setSaving(false);
       }
 
       async function deleteEntry(id) {
@@ -279,72 +255,137 @@
       if (authLoading) return null;
       if (!session) return <LoginScreen />;
 
-      const grouped = groupByDate(entries);
+      const grouped = groupByDate(filteredEntries);
       const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
+
+      const entriesTabLabel = entries.length === 0
+        ? "Entries"
+        : hasActiveFilters
+          ? `Entries (${filteredEntries.length}/${entries.length})`
+          : `Entries (${entries.length})`;
 
       return (
         <div style={{ minHeight: "100vh", background: "var(--paper)" }}>
           <style>{`
-            .header {
+            .sticky-nav {
               position: sticky; top: 0; z-index: 10;
               background: var(--paper);
+            }
+            .header {
               border-bottom: 1px solid var(--rule);
               padding: 16px 20px 12px;
               display: flex; align-items: baseline; justify-content: space-between;
             }
             .wordmark {
-              font-family: 'Lora', serif;
-              font-size: 13px; font-weight: 600;
-              letter-spacing: 0.15em; text-transform: uppercase;
-              color: var(--ink);
+              font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
+              letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
             }
-            .header-right {
-              display: flex; align-items: baseline; gap: 16px;
-            }
+            .header-right { display: flex; align-items: baseline; gap: 16px; }
             .live-clock {
-              font-family: 'DM Mono', monospace;
-              font-size: 11px; font-weight: 300;
+              font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
               color: var(--ink-faint); letter-spacing: 0.05em;
             }
             .signout-btn {
               font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
               color: var(--ink-faint); letter-spacing: 0.05em;
-              background: none; border: none; cursor: pointer; padding: 0;
-              transition: color 0.15s;
+              background: none; border: none; cursor: pointer; padding: 0; transition: color 0.15s;
             }
             .signout-btn:hover { color: var(--accent); }
-            .tab-bar {
-              display: flex; border-bottom: 1px solid var(--rule); padding: 0 20px;
-            }
+            .tab-bar { display: flex; align-items: center; border-bottom: 1px solid var(--rule); padding: 0 20px; }
             .tab {
               font-family: 'Lora', serif; font-size: 12px; font-weight: 400;
-              letter-spacing: 0.08em; text-transform: uppercase;
-              color: var(--ink-faint);
-              padding: 10px 0 9px; margin-right: 24px;
-              cursor: pointer;
+              letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
+              padding: 10px 0 9px; margin-right: 24px; cursor: pointer;
               border: none; border-bottom: 1.5px solid transparent;
               background: none; transition: color 0.15s, border-color 0.15s;
             }
             .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
             .tab:hover { color: var(--ink); }
+            .search-toggle {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
+              padding: 10px 0 9px; margin-left: auto; margin-right: 0;
+              cursor: pointer; border: none; border-bottom: 1.5px solid transparent;
+              background: none; transition: color 0.15s, border-color 0.15s;
+              display: flex; align-items: center; gap: 5px;
+            }
+            .search-toggle.open { color: var(--ink); border-bottom-color: var(--ink); }
+            .search-toggle:hover { color: var(--ink); }
+            .search-pip {
+              width: 5px; height: 5px; border-radius: 50%;
+              background: var(--accent); flex-shrink: 0;
+            }
+            .filter-panel {
+              overflow: hidden;
+              max-height: 0;
+              transition: max-height 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                          opacity 0.25s ease,
+                          border-color 0.38s ease;
+              opacity: 0;
+              border-bottom: 0px solid var(--rule);
+            }
+            .filter-panel.open {
+              max-height: 320px;
+              opacity: 1;
+              border-bottom-width: 1px;
+            }
+            .filter-panel-inner {
+              padding: 20px 20px 18px;
+              max-width: 640px;
+              margin: 0 auto;
+            }
+            .filter-row {
+              display: grid; grid-template-columns: 1fr 1fr;
+              gap: 0 24px; margin-bottom: 20px;
+            }
+            .filter-row.full { grid-template-columns: 1fr; }
+            .filter-field { display: flex; flex-direction: column; gap: 7px; }
+            .filter-label {
+              font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 300;
+              letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+            }
+            .filter-input {
+              font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
+              color: var(--ink-light); background: transparent;
+              border: none; outline: none;
+              border-bottom: 1px solid var(--rule);
+              padding: 4px 0 6px; letter-spacing: 0.04em; width: 100%;
+              transition: border-color 0.15s;
+            }
+            .filter-input:focus { border-bottom-color: var(--ink-faint); }
+            .filter-input::placeholder { color: var(--ink-faint); }
+            .filter-input[type="date"] { -webkit-appearance: none; appearance: none; color-scheme: light; }
+            .filter-input[type="date"]::-webkit-calendar-picker-indicator {
+              opacity: 0.25; cursor: pointer;
+            }
+            .filter-footer {
+              display: flex; justify-content: space-between; align-items: center;
+              margin-top: 4px;
+            }
+            .filter-summary {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.04em; font-style: italic;
+            }
+            .clear-btn {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              letter-spacing: 0.06em; color: var(--accent);
+              background: none; border: none; cursor: pointer;
+              padding: 0; opacity: 0.8; transition: opacity 0.15s;
+            }
+            .clear-btn:hover { opacity: 1; }
             .write-panel { padding: 28px 20px 40px; max-width: 640px; margin: 0 auto; }
             .date-label {
               font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.1em; text-transform: uppercase;
-              margin-bottom: 16px;
+              color: var(--ink-faint); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
             }
             .textarea {
               width: 100%; font-family: 'Lora', serif; font-size: 17px; line-height: 1.65;
               color: var(--ink); background: transparent; border: none; outline: none;
               resize: none; min-height: 140px;
-              border-bottom: 1px solid var(--rule); padding-bottom: 12px;
-              caret-color: var(--accent);
+              border-bottom: 1px solid var(--rule); padding-bottom: 12px; caret-color: var(--accent);
             }
             .textarea::placeholder { color: var(--ink-faint); font-style: italic; }
-            .location-row {
-              display: flex; align-items: center; gap: 10px;
-              margin-top: 14px; margin-bottom: 28px;
-            }
+            .location-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; margin-bottom: 28px; }
             .location-input {
               flex: 1; font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
               color: var(--ink-light); background: transparent; border: none; outline: none;
@@ -392,10 +433,7 @@
               font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 300;
               color: var(--ink-faint); letter-spacing: 0.04em; padding-top: 2px;
             }
-            .entry-text {
-              font-family: 'Lora', serif; font-size: 15px; line-height: 1.6;
-              color: var(--ink); margin-bottom: 4px;
-            }
+            .entry-text { font-family: 'Lora', serif; font-size: 15px; line-height: 1.6; color: var(--ink); margin-bottom: 4px; }
             .entry-location {
               font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
               color: var(--ink-faint); letter-spacing: 0.04em;
@@ -413,24 +451,92 @@
             }
           `}</style>
 
-          <div className="header">
-            <span className="wordmark">Log</span>
-            <div className="header-right">
-              <span className="live-clock">{formatTime(now)}</span>
-              <button className="signout-btn" onClick={() => db.auth.signOut()}>sign out</button>
+          <div className="sticky-nav">
+            <div className="header">
+              <span className="wordmark">Log</span>
+              <div className="header-right">
+                <span className="live-clock">{formatTime(now)}</span>
+                <button className="signout-btn" onClick={() => db.auth.signOut()}>sign out</button>
+              </div>
             </div>
-          </div>
 
-          <div className="tab-bar">
-            <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
-              Entries {entries.length > 0 && `(${entries.length})`}
-            </button>
-            <button
-              className={`tab ${view === "write" ? "active" : ""}`}
-              onClick={() => { setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
-            >
-              + New
-            </button>
+            <div className="tab-bar">
+              <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
+                {entriesTabLabel}
+              </button>
+              <button
+                className={`tab ${view === "write" ? "active" : ""}`}
+                onClick={() => { setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
+              >
+                + New
+              </button>
+              <button
+                className={`search-toggle ${filterOpen ? "open" : ""}`}
+                onClick={() => setFilterOpen(f => !f)}
+              >
+                Search
+                {hasActiveFilters && <span className="search-pip" />}
+              </button>
+            </div>
+
+            <div className={`filter-panel ${filterOpen ? "open" : ""}`}>
+              <div className="filter-panel-inner">
+                <div className="filter-row">
+                  <div className="filter-field">
+                    <span className="filter-label">From</span>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filterDateFrom}
+                      max={filterDateTo || undefined}
+                      onChange={e => setFilterDateFrom(e.target.value)}
+                    />
+                  </div>
+                  <div className="filter-field">
+                    <span className="filter-label">To</span>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filterDateTo}
+                      min={filterDateFrom || undefined}
+                      onChange={e => setFilterDateTo(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="filter-row full">
+                  <div className="filter-field">
+                    <span className="filter-label">Content</span>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Search entries…"
+                      value={filterText}
+                      onChange={e => setFilterText(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="filter-row full" style={{ marginBottom: hasActiveFilters ? 16 : 0 }}>
+                  <div className="filter-field">
+                    <span className="filter-label">Location</span>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Search locations…"
+                      value={filterLocation}
+                      onChange={e => setFilterLocation(e.target.value)}
+                    />
+                  </div>
+                </div>
+                {hasActiveFilters && (
+                  <div className="filter-footer">
+                    <span className="filter-summary">
+                      {filteredEntries.length} of {entries.length} {entries.length === 1 ? "entry" : "entries"}
+                    </span>
+                    <button className="clear-btn" onClick={clearFilters}>clear all</button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {view === "write" && (
@@ -465,9 +571,12 @@
             <div className="log-panel">
               {loading ? (
                 <div className="empty-state">Loading entries...</div>
-              ) : entries.length === 0 ? (
+              ) : filteredEntries.length === 0 ? (
                 <div className="empty-state">
-                  Nothing logged yet.<br />Tap <em>+ New</em> to record your first entry.
+                  {hasActiveFilters
+                    ? <>No entries match your filters.<br /><span style={{ fontSize: 13 }}>Adjust or clear to see more.</span></>
+                    : <>Nothing logged yet.<br />Tap <em>+ New</em> to record your first entry.</>
+                  }
                 </div>
               ) : (
                 sortedDates.map(dateKey => (
