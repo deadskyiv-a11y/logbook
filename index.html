@@ -39,6 +39,7 @@
 
     const SUPABASE_URL = "https://ifnfoxgqugtilyergnsb.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmbmZveGdxdWd0aWx5ZXJnbnNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNDEzMDUsImV4cCI6MjA5NTcxNzMwNX0.-ceyZylPUMEj6Z13vPET7xFq5Zm1tUlz4OeYlvVBPYU";
+    const OWNER_EMAIL = "deadskyiv@gmail.com";
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     function formatTime(date) {
@@ -59,7 +60,111 @@
       return groups;
     }
 
+    function LoginScreen() {
+      const [sent, setSent] = useState(false);
+      const [sending, setSending] = useState(false);
+      const [error, setError] = useState("");
+
+      async function sendLink() {
+        setSending(true);
+        setError("");
+        const { error } = await db.auth.signInWithOtp({
+          email: OWNER_EMAIL,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) {
+          setError(error.message);
+          setSending(false);
+        } else {
+          setSent(true);
+          setSending(false);
+        }
+      }
+
+      return (
+        <div style={{ minHeight: "100vh", background: "var(--paper)", display: "flex", flexDirection: "column" }}>
+          <style>{`
+            .login-header {
+              border-bottom: 1px solid var(--rule);
+              padding: 16px 20px 12px;
+            }
+            .wordmark {
+              font-family: 'Lora', serif;
+              font-size: 13px; font-weight: 600;
+              letter-spacing: 0.15em; text-transform: uppercase;
+              color: var(--ink);
+            }
+            .login-body {
+              flex: 1; display: flex; align-items: center; justify-content: center;
+              padding: 40px 20px;
+            }
+            .login-card {
+              width: 100%; max-width: 360px; text-align: center;
+            }
+            .login-title {
+              font-family: 'Lora', serif; font-size: 20px; font-weight: 500;
+              color: var(--ink); margin-bottom: 10px;
+            }
+            .login-sub {
+              font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.04em; line-height: 1.7;
+              margin-bottom: 32px;
+            }
+            .login-btn {
+              font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
+              letter-spacing: 0.1em; text-transform: uppercase;
+              color: var(--paper); background: var(--ink); border: none; cursor: pointer;
+              padding: 14px 32px; width: 100%;
+              transition: background 0.15s;
+            }
+            .login-btn:hover { background: #2d2d2a; }
+            .login-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
+            .login-sent {
+              font-family: 'Lora', serif; font-size: 15px; font-style: italic;
+              color: var(--ink-light); line-height: 1.8;
+            }
+            .login-sent-mono {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.04em; margin-top: 16px;
+              display: block;
+            }
+            .login-error {
+              font-family: 'DM Mono', monospace; font-size: 11px;
+              color: var(--accent); letter-spacing: 0.03em;
+              margin-top: 16px;
+            }
+          `}</style>
+          <div className="login-header">
+            <span className="wordmark">Log</span>
+          </div>
+          <div className="login-body">
+            <div className="login-card">
+              {sent ? (
+                <>
+                  <div className="login-sent">Check your email.<br />A sign-in link is on its way.</div>
+                  <span className="login-sent-mono">{OWNER_EMAIL}</span>
+                </>
+              ) : (
+                <>
+                  <div className="login-title">Sign in</div>
+                  <div className="login-sub">
+                    A sign-in link will be sent<br />to {OWNER_EMAIL}
+                  </div>
+                  <button className="login-btn" onClick={sendLink} disabled={sending}>
+                    {sending ? "Sending..." : "Send sign-in link"}
+                  </button>
+                  {error && <div className="login-error">{error}</div>}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function App() {
+      const [session, setSession] = useState(null);
+      const [authLoading, setAuthLoading] = useState(true);
       const [entries, setEntries] = useState([]);
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
@@ -72,11 +177,35 @@
       const textRef = useRef(null);
 
       useEffect(() => {
+        db.auth.getSession().then(({ data: { session } }) => {
+          if (session && session.user.email !== OWNER_EMAIL) {
+            db.auth.signOut();
+            setSession(null);
+          } else {
+            setSession(session);
+          }
+          setAuthLoading(false);
+        });
+
+        const { data: { subscription } } = db.auth.onAuthStateChange((_event, session) => {
+          if (session && session.user.email !== OWNER_EMAIL) {
+            db.auth.signOut();
+            setSession(null);
+          } else {
+            setSession(session);
+          }
+        });
+
+        return () => subscription.unsubscribe();
+      }, []);
+
+      useEffect(() => {
         const t = setInterval(() => setNow(new Date()), 1000);
         return () => clearInterval(t);
       }, []);
 
       useEffect(() => {
+        if (!session) return;
         async function fetchEntries() {
           const { data, error } = await db
             .from("entries")
@@ -86,7 +215,7 @@
           setLoading(false);
         }
         fetchEntries();
-      }, []);
+      }, [session]);
 
       function getLocation() {
         if (!navigator.geolocation) {
@@ -147,6 +276,9 @@
         if (!error) setEntries(prev => prev.filter(e => e.id !== id));
       }
 
+      if (authLoading) return null;
+      if (!session) return <LoginScreen />;
+
       const grouped = groupByDate(entries);
       const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
 
@@ -166,11 +298,21 @@
               letter-spacing: 0.15em; text-transform: uppercase;
               color: var(--ink);
             }
+            .header-right {
+              display: flex; align-items: baseline; gap: 16px;
+            }
             .live-clock {
               font-family: 'DM Mono', monospace;
               font-size: 11px; font-weight: 300;
               color: var(--ink-faint); letter-spacing: 0.05em;
             }
+            .signout-btn {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.05em;
+              background: none; border: none; cursor: pointer; padding: 0;
+              transition: color 0.15s;
+            }
+            .signout-btn:hover { color: var(--accent); }
             .tab-bar {
               display: flex; border-bottom: 1px solid var(--rule); padding: 0 20px;
             }
@@ -273,7 +415,10 @@
 
           <div className="header">
             <span className="wordmark">Log</span>
-            <span className="live-clock">{formatTime(now)}</span>
+            <div className="header-right">
+              <span className="live-clock">{formatTime(now)}</span>
+              <button className="signout-btn" onClick={() => db.auth.signOut()}>sign out</button>
+            </div>
           </div>
 
           <div className="tab-bar">
