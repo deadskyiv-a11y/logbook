@@ -1,15 +1,335 @@
 <!DOCTYPE html>
+
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Log</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="text/babel" src="app.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Log" />
+  <title>Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #faf9f6;
+      font-family: 'Lora', Georgia, serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    :root {
+      --paper: #faf9f6;
+      --ink: #1a1a18;
+      --ink-light: #5c5c56;
+      --ink-faint: #9a9a90;
+      --rule: #e4e2db;
+      --accent: #c0392b;
+      --accent-soft: #f0e8e6;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const STORAGE_KEY = "logbook_entries";
+
+    function formatTime(date) {
+      return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function formatDate(date) {
+      return date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    }
+
+    function groupByDate(entries) {
+      const groups = {};
+      entries.forEach(entry => {
+        const key = new Date(entry.timestamp).toDateString();
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(entry);
+      });
+      return groups;
+    }
+
+    function App() {
+      const [entries, setEntries] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
+        catch { return []; }
+      });
+      const [text, setText] = useState("");
+      const [location, setLocation] = useState("");
+      const [locLoading, setLocLoading] = useState(false);
+      const [now, setNow] = useState(new Date());
+      const [justAdded, setJustAdded] = useState(null);
+      const [view, setView] = useState("log");
+      const textRef = useRef(null);
+
+      useEffect(() => {
+        const t = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(t);
+      }, []);
+
+      useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
+        catch {}
+      }, [entries]);
+
+      function getLocation() {
+        if (!navigator.geolocation) return;
+        setLocLoading(true);
+        navigator.geolocation.getCurrentPosition(
+          async pos => {
+            const { latitude, longitude } = pos.coords;
+            try {
+              const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+              const data = await res.json();
+              const addr = data.address;
+              const place = addr.suburb || addr.neighbourhood || addr.quarter || addr.city_district || addr.city || addr.town || addr.village || "";
+              const city = addr.city || addr.town || addr.county || "";
+              setLocation(place && city && place !== city ? `${place}, ${city}` : place || city || "Unknown");
+            } catch {
+              setLocation(`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
+            }
+            setLocLoading(false);
+          },
+          () => setLocLoading(false)
+        );
+      }
+
+      function addEntry() {
+        if (!text.trim()) return;
+        const entry = {
+          id: Date.now(),
+          timestamp: new Date().toISOString(),
+          text: text.trim(),
+          location: location.trim(),
+        };
+        setEntries(prev => [entry, ...prev]);
+        setJustAdded(entry.id);
+        setText("");
+        setLocation("");
+        setView("log");
+        setTimeout(() => setJustAdded(null), 2000);
+      }
+
+      function deleteEntry(id) {
+        if (window.confirm("Delete this entry?")) {
+          setEntries(prev => prev.filter(e => e.id !== id));
+        }
+      }
+
+      const grouped = groupByDate(entries);
+      const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
+
+      return (
+        <div style={{ minHeight: "100vh", background: "var(--paper)" }}>
+          <style>{`
+            .header {
+              position: sticky; top: 0; z-index: 10;
+              background: var(--paper);
+              border-bottom: 1px solid var(--rule);
+              padding: 16px 20px 12px;
+              display: flex; align-items: baseline; justify-content: space-between;
+            }
+            .wordmark {
+              font-family: 'Lora', serif;
+              font-size: 13px; font-weight: 600;
+              letter-spacing: 0.15em; text-transform: uppercase;
+              color: var(--ink);
+            }
+            .live-clock {
+              font-family: 'DM Mono', monospace;
+              font-size: 11px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.05em;
+            }
+            .tab-bar {
+              display: flex; border-bottom: 1px solid var(--rule); padding: 0 20px;
+            }
+            .tab {
+              font-family: 'Lora', serif; font-size: 12px; font-weight: 400;
+              letter-spacing: 0.08em; text-transform: uppercase;
+              color: var(--ink-faint);
+              padding: 10px 0 9px; margin-right: 24px;
+              cursor: pointer;
+              border: none; border-bottom: 1.5px solid transparent;
+              background: none; transition: color 0.15s, border-color 0.15s;
+            }
+            .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+            .tab:hover { color: var(--ink); }
+            .write-panel { padding: 28px 20px 40px; max-width: 640px; margin: 0 auto; }
+            .date-label {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.1em; text-transform: uppercase;
+              margin-bottom: 16px;
+            }
+            .textarea {
+              width: 100%; font-family: 'Lora', serif; font-size: 17px; line-height: 1.65;
+              color: var(--ink); background: transparent; border: none; outline: none;
+              resize: none; min-height: 140px;
+              border-bottom: 1px solid var(--rule); padding-bottom: 12px;
+              caret-color: var(--accent);
+            }
+            .textarea::placeholder { color: var(--ink-faint); font-style: italic; }
+            .location-row {
+              display: flex; align-items: center; gap: 10px;
+              margin-top: 14px; margin-bottom: 28px;
+            }
+            .location-input {
+              flex: 1; font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
+              color: var(--ink-light); background: transparent; border: none; outline: none;
+              border-bottom: 1px solid var(--rule); padding: 4px 0 5px; letter-spacing: 0.04em;
+            }
+            .location-input::placeholder { color: var(--ink-faint); }
+            .loc-btn {
+              font-family: 'DM Mono', monospace; font-size: 10px; color: var(--accent);
+              background: none; border: none; cursor: pointer; letter-spacing: 0.05em;
+              padding: 0; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s;
+            }
+            .loc-btn:hover { opacity: 1; }
+            .submit-btn {
+              font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
+              letter-spacing: 0.1em; text-transform: uppercase;
+              color: var(--paper); background: var(--ink); border: none; cursor: pointer;
+              padding: 14px 32px; display: block; margin-left: auto;
+              transition: background 0.15s; width: 100%;
+            }
+            .submit-btn:hover { background: #2d2d2a; }
+            .submit-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
+            .log-panel { max-width: 640px; margin: 0 auto; padding-bottom: 80px; }
+            .day-group { padding: 0 20px; }
+            .day-header {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
+              padding: 24px 0 10px; border-bottom: 1px solid var(--rule);
+              display: flex; justify-content: space-between; align-items: baseline;
+            }
+            .entry {
+              display: grid; grid-template-columns: 52px 1fr 28px;
+              gap: 0 14px; padding: 16px 0; border-bottom: 1px solid var(--rule);
+              animation: fadeSlide 0.3s ease;
+            }
+            .entry.new { animation: highlight 2s ease forwards; }
+            @keyframes fadeSlide {
+              from { opacity: 0; transform: translateY(-6px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes highlight {
+              0% { background: var(--accent-soft); }
+              100% { background: transparent; }
+            }
+            .entry-time {
+              font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.04em; padding-top: 2px;
+            }
+            .entry-text {
+              font-family: 'Lora', serif; font-size: 15px; line-height: 1.6;
+              color: var(--ink); margin-bottom: 4px;
+            }
+            .entry-location {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              color: var(--ink-faint); letter-spacing: 0.04em;
+            }
+            .entry-location::before { content: '↳ '; color: var(--accent); font-size: 9px; }
+            .delete-btn {
+              background: none; border: none; color: var(--rule);
+              cursor: pointer; font-size: 18px; line-height: 1;
+              padding: 0; transition: color 0.15s; align-self: start; padding-top: 1px;
+            }
+            .delete-btn:hover { color: var(--accent); }
+            .empty-state {
+              padding: 80px 20px; text-align: center; color: var(--ink-faint);
+              font-family: 'Lora', serif; font-size: 15px; font-style: italic; line-height: 1.9;
+            }
+          `}</style>
+
+```
+      <div className="header">
+        <span className="wordmark">Log</span>
+        <span className="live-clock">{formatTime(now)}</span>
+      </div>
+
+      <div className="tab-bar">
+        <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
+          Entries {entries.length > 0 && `(${entries.length})`}
+        </button>
+        <button
+          className={`tab ${view === "write" ? "active" : ""}`}
+          onClick={() => { setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
+        >
+          + New
+        </button>
+      </div>
+
+      {view === "write" && (
+        <div className="write-panel">
+          <div className="date-label">{formatDate(now)}</div>
+          <textarea
+            ref={textRef}
+            className="textarea"
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="What's happening right now..."
+            rows={6}
+          />
+          <div className="location-row">
+            <input
+              className="location-input"
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              placeholder="Location (optional)"
+            />
+            <button className="loc-btn" onClick={getLocation} disabled={locLoading}>
+              {locLoading ? "Locating..." : "Use GPS"}
+            </button>
+          </div>
+          <button className="submit-btn" onClick={addEntry} disabled={!text.trim()}>
+            Log it
+          </button>
+        </div>
+      )}
+
+      {view === "log" && (
+        <div className="log-panel">
+          {entries.length === 0 ? (
+            <div className="empty-state">
+              Nothing logged yet.<br />Tap <em>+ New</em> to record your first entry.
+            </div>
+          ) : (
+            sortedDates.map(dateKey => (
+              <div key={dateKey} className="day-group">
+                <div className="day-header">
+                  <span>{formatDate(new Date(dateKey))}</span>
+                  <span>{grouped[dateKey].length} {grouped[dateKey].length === 1 ? "entry" : "entries"}</span>
+                </div>
+                {grouped[dateKey].map(entry => (
+                  <div key={entry.id} className={`entry ${justAdded === entry.id ? "new" : ""}`}>
+                    <div className="entry-time">{formatTime(new Date(entry.timestamp))}</div>
+                    <div>
+                      <div className="entry-text">{entry.text}</div>
+                      {entry.location && <div className="entry-location">{entry.location}</div>}
+                    </div>
+                    <button className="delete-btn" onClick={() => deleteEntry(entry.id)}>×</button>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+```
+
+  </script>
+</body>
 </html>
