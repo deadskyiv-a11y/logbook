@@ -89,24 +89,35 @@
       }, []);
 
       function getLocation() {
-        if (!navigator.geolocation) return;
+        if (!navigator.geolocation) {
+          setLocation("Geolocation not supported");
+          return;
+        }
         setLocLoading(true);
         navigator.geolocation.getCurrentPosition(
           async pos => {
             const { latitude, longitude } = pos.coords;
             try {
-              const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+              const res = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+                { headers: { "Accept-Language": "en" } }
+              );
               const data = await res.json();
               const addr = data.address;
               const place = addr.suburb || addr.neighbourhood || addr.quarter || addr.city_district || addr.city || addr.town || addr.village || "";
               const city = addr.city || addr.town || addr.county || "";
-              setLocation(place && city && place !== city ? `${place}, ${city}` : place || city || "Unknown");
+              setLocation(place && city && place !== city ? `${place}, ${city}` : place || city || `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
             } catch {
               setLocation(`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
             }
             setLocLoading(false);
           },
-          () => setLocLoading(false)
+          err => {
+            const msg = err.code === 1 ? "Location access denied" : "Could not get location";
+            setLocation(msg);
+            setLocLoading(false);
+          },
+          { timeout: 10000, maximumAge: 60000 }
         );
       }
 
