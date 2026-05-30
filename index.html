@@ -12,6 +12,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -36,7 +37,9 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    const STORAGE_KEY = "logbook_entries";
+    const SUPABASE_URL = "https://ifnfoxgqugtilyergnsb.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmbmZveGdxdWd0aWx5ZXJnbnNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNDEzMDUsImV4cCI6MjA5NTcxNzMwNX0.-ceyZylPUMEj6Z13vPET7xFq5Zm1tUlz4OeYlvVBPYU";
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     function formatTime(date) {
       return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -57,10 +60,9 @@
     }
 
     function App() {
-      const [entries, setEntries] = useState(() => {
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
-        catch { return []; }
-      });
+      const [entries, setEntries] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
       const [text, setText] = useState("");
       const [location, setLocation] = useState("");
       const [locLoading, setLocLoading] = useState(false);
@@ -75,9 +77,16 @@
       }, []);
 
       useEffect(() => {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
-        catch {}
-      }, [entries]);
+        async function fetchEntries() {
+          const { data, error } = await db
+            .from("entries")
+            .select("*")
+            .order("timestamp", { ascending: false });
+          if (!error) setEntries(data || []);
+          setLoading(false);
+        }
+        fetchEntries();
+      }, []);
 
       function getLocation() {
         if (!navigator.geolocation) return;
@@ -101,26 +110,30 @@
         );
       }
 
-      function addEntry() {
-        if (!text.trim()) return;
-        const entry = {
-          id: Date.now(),
-          timestamp: new Date().toISOString(),
-          text: text.trim(),
-          location: location.trim(),
-        };
-        setEntries(prev => [entry, ...prev]);
-        setJustAdded(entry.id);
+      async function addEntry() {
+        if (!text.trim() || saving) return;
+        setSaving(true);
+        const timestamp = new Date().toISOString();
+        const { data, error } = await db
+          .from("entries")
+          .insert({ timestamp, text: text.trim(), location: location.trim() })
+          .select()
+          .single();
+        if (!error && data) {
+          setEntries(prev => [data, ...prev]);
+          setJustAdded(data.id);
+          setTimeout(() => setJustAdded(null), 2000);
+        }
         setText("");
         setLocation("");
         setView("log");
-        setTimeout(() => setJustAdded(null), 2000);
+        setSaving(false);
       }
 
-      function deleteEntry(id) {
-        if (window.confirm("Delete this entry?")) {
-          setEntries(prev => prev.filter(e => e.id !== id));
-        }
+      async function deleteEntry(id) {
+        if (!window.confirm("Delete this entry?")) return;
+        const { error } = await db.from("entries").delete().eq("id", id);
+        if (!error) setEntries(prev => prev.filter(e => e.id !== id));
       }
 
       const grouped = groupByDate(entries);
@@ -286,15 +299,17 @@
                   {locLoading ? "Locating..." : "Use GPS"}
                 </button>
               </div>
-              <button className="submit-btn" onClick={addEntry} disabled={!text.trim()}>
-                Log it
+              <button className="submit-btn" onClick={addEntry} disabled={!text.trim() || saving}>
+                {saving ? "Saving..." : "Log it"}
               </button>
             </div>
           )}
 
           {view === "log" && (
             <div className="log-panel">
-              {entries.length === 0 ? (
+              {loading ? (
+                <div className="empty-state">Loading entries...</div>
+              ) : entries.length === 0 ? (
                 <div className="empty-state">
                   Nothing logged yet.<br />Tap <em>+ New</em> to record your first entry.
                 </div>
