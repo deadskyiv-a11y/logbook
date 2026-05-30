@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -248,88 +247,85 @@
             }
           `}</style>
 
-```
-      <div className="header">
-        <span className="wordmark">Log</span>
-        <span className="live-clock">{formatTime(now)}</span>
-      </div>
+          <div className="header">
+            <span className="wordmark">Log</span>
+            <span className="live-clock">{formatTime(now)}</span>
+          </div>
 
-      <div className="tab-bar">
-        <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
-          Entries {entries.length > 0 && `(${entries.length})`}
-        </button>
-        <button
-          className={`tab ${view === "write" ? "active" : ""}`}
-          onClick={() => { setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
-        >
-          + New
-        </button>
-      </div>
-
-      {view === "write" && (
-        <div className="write-panel">
-          <div className="date-label">{formatDate(now)}</div>
-          <textarea
-            ref={textRef}
-            className="textarea"
-            value={text}
-            onChange={e => setText(e.target.value)}
-            placeholder="What's happening right now..."
-            rows={6}
-          />
-          <div className="location-row">
-            <input
-              className="location-input"
-              value={location}
-              onChange={e => setLocation(e.target.value)}
-              placeholder="Location (optional)"
-            />
-            <button className="loc-btn" onClick={getLocation} disabled={locLoading}>
-              {locLoading ? "Locating..." : "Use GPS"}
+          <div className="tab-bar">
+            <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
+              Entries {entries.length > 0 && `(${entries.length})`}
+            </button>
+            <button
+              className={`tab ${view === "write" ? "active" : ""}`}
+              onClick={() => { setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
+            >
+              + New
             </button>
           </div>
-          <button className="submit-btn" onClick={addEntry} disabled={!text.trim()}>
-            Log it
-          </button>
-        </div>
-      )}
 
-      {view === "log" && (
-        <div className="log-panel">
-          {entries.length === 0 ? (
-            <div className="empty-state">
-              Nothing logged yet.<br />Tap <em>+ New</em> to record your first entry.
-            </div>
-          ) : (
-            sortedDates.map(dateKey => (
-              <div key={dateKey} className="day-group">
-                <div className="day-header">
-                  <span>{formatDate(new Date(dateKey))}</span>
-                  <span>{grouped[dateKey].length} {grouped[dateKey].length === 1 ? "entry" : "entries"}</span>
-                </div>
-                {grouped[dateKey].map(entry => (
-                  <div key={entry.id} className={`entry ${justAdded === entry.id ? "new" : ""}`}>
-                    <div className="entry-time">{formatTime(new Date(entry.timestamp))}</div>
-                    <div>
-                      <div className="entry-text">{entry.text}</div>
-                      {entry.location && <div className="entry-location">{entry.location}</div>}
-                    </div>
-                    <button className="delete-btn" onClick={() => deleteEntry(entry.id)}>×</button>
-                  </div>
-                ))}
+          {view === "write" && (
+            <div className="write-panel">
+              <div className="date-label">{formatDate(now)}</div>
+              <textarea
+                ref={textRef}
+                className="textarea"
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="What's happening right now..."
+                rows={6}
+              />
+              <div className="location-row">
+                <input
+                  className="location-input"
+                  value={location}
+                  onChange={e => setLocation(e.target.value)}
+                  placeholder="Location (optional)"
+                />
+                <button className="loc-btn" onClick={getLocation} disabled={locLoading}>
+                  {locLoading ? "Locating..." : "Use GPS"}
+                </button>
               </div>
-            ))
+              <button className="submit-btn" onClick={addEntry} disabled={!text.trim()}>
+                Log it
+              </button>
+            </div>
+          )}
+
+          {view === "log" && (
+            <div className="log-panel">
+              {entries.length === 0 ? (
+                <div className="empty-state">
+                  Nothing logged yet.<br />Tap <em>+ New</em> to record your first entry.
+                </div>
+              ) : (
+                sortedDates.map(dateKey => (
+                  <div key={dateKey} className="day-group">
+                    <div className="day-header">
+                      <span>{formatDate(new Date(dateKey))}</span>
+                      <span>{grouped[dateKey].length} {grouped[dateKey].length === 1 ? "entry" : "entries"}</span>
+                    </div>
+                    {grouped[dateKey].map(entry => (
+                      <div key={entry.id} className={`entry ${justAdded === entry.id ? "new" : ""}`}>
+                        <div className="entry-time">{formatTime(new Date(entry.timestamp))}</div>
+                        <div>
+                          <div className="entry-text">{entry.text}</div>
+                          {entry.location && <div className="entry-location">{entry.location}</div>}
+                        </div>
+                        <button className="delete-btn" onClick={() => deleteEntry(entry.id)}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
           )}
         </div>
-      )}
-    </div>
-  );
-}
+      );
+    }
 
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
-```
-
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
   </script>
 </body>
 </html>
