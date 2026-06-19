@@ -207,6 +207,7 @@
       const [now, setNow] = useState(new Date());
       const [justAdded, setJustAdded] = useState(null);
       const [view, setView] = useState("log");
+      const [editingEntry, setEditingEntry] = useState(null);
       const [filterOpen, setFilterOpen] = useState(false);
       const [filterText, setFilterText] = useState("");
       const [filterLocation, setFilterLocation] = useState("");
@@ -291,17 +292,43 @@
         );
       }
 
+      function startEdit(entry) {
+        setEditingEntry(entry);
+        setText(entry.text);
+        setLocation(entry.location || "");
+        setView("write");
+        setTimeout(() => textRef.current?.focus(), 80);
+      }
+
+      function cancelEdit() {
+        setEditingEntry(null);
+        setText(""); setLocation("");
+        setView("log");
+      }
+
       async function addEntry() {
         if (!text.trim() || saving) return;
         setSaving(true);
-        const timestamp = new Date().toISOString();
-        const { data, error } = await db
-          .from("entries").insert({ timestamp, text: text.trim(), location: location.trim() })
-          .select().single();
-        if (!error && data) {
-          setEntries(prev => [data, ...prev]);
-          setJustAdded(data.id);
-          setTimeout(() => setJustAdded(null), 2000);
+        if (editingEntry) {
+          const { data, error } = await db
+            .from("entries")
+            .update({ text: text.trim(), location: location.trim() })
+            .eq("id", editingEntry.id)
+            .select().single();
+          if (!error && data) {
+            setEntries(prev => prev.map(e => e.id === data.id ? data : e));
+          }
+          setEditingEntry(null);
+        } else {
+          const timestamp = new Date().toISOString();
+          const { data, error } = await db
+            .from("entries").insert({ timestamp, text: text.trim(), location: location.trim() })
+            .select().single();
+          if (!error && data) {
+            setEntries(prev => [data, ...prev]);
+            setJustAdded(data.id);
+            setTimeout(() => setJustAdded(null), 2000);
+          }
         }
         setText(""); setLocation(""); setView("log"); setSaving(false);
       }
@@ -503,12 +530,27 @@
               color: var(--ink-faint); letter-spacing: 0.04em;
             }
             .entry-location::before { content: '↳ '; color: var(--accent); font-size: 9px; }
+            .entry-actions { display: flex; flex-direction: column; align-items: center; gap: 8px; align-self: start; }
+            .edit-btn {
+              background: none; border: none; color: var(--rule);
+              cursor: pointer; font-size: 13px; line-height: 1;
+              padding: 0; transition: color 0.15s;
+            }
+            .edit-btn:hover { color: var(--ink-faint); }
             .delete-btn {
               background: none; border: none; color: var(--rule);
               cursor: pointer; font-size: 18px; line-height: 1;
-              padding: 0; transition: color 0.15s; align-self: start; padding-top: 1px;
+              padding: 0; transition: color 0.15s;
             }
             .delete-btn:hover { color: var(--accent); }
+            .cancel-edit-btn {
+              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+              letter-spacing: 0.05em; color: var(--ink-faint);
+              background: none; border: none; cursor: pointer; padding: 0;
+              margin-top: 12px; display: block; text-align: center; width: 100%;
+              transition: color 0.15s;
+            }
+            .cancel-edit-btn:hover { color: var(--accent); }
             .empty-state {
               padding: 80px 20px; text-align: center; color: var(--ink-faint);
               font-family: 'Lora', serif; font-size: 15px; font-style: italic; line-height: 1.9;
@@ -530,9 +572,9 @@
               </button>
               <button
                 className={`tab ${view === "write" ? "active" : ""}`}
-                onClick={() => { setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
+                onClick={() => { setEditingEntry(null); setText(""); setLocation(""); setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
               >
-                + New
+                {editingEntry ? "Editing" : "+ New"}
               </button>
               <button
                 className={`search-toggle ${filterOpen ? "open" : ""}`}
@@ -605,7 +647,11 @@
 
           {view === "write" && (
             <div className="write-panel">
-              <div className="date-label">{formatDate(now)}</div>
+              <div className="date-label">
+                {editingEntry
+                  ? `Editing — ${formatDate(new Date(editingEntry.timestamp))}`
+                  : formatDate(now)}
+              </div>
               <textarea
                 ref={textRef}
                 className="textarea"
@@ -626,8 +672,11 @@
                 </button>
               </div>
               <button className="submit-btn" onClick={addEntry} disabled={!text.trim() || saving}>
-                {saving ? "Saving..." : "Log it"}
+                {saving ? "Saving..." : editingEntry ? "Save changes" : "Log it"}
               </button>
+              {editingEntry && (
+                <button className="cancel-edit-btn" onClick={cancelEdit}>cancel</button>
+              )}
             </div>
           )}
 
@@ -656,7 +705,10 @@
                           <div className="entry-text">{entry.text}</div>
                           {entry.location && <div className="entry-location">{entry.location}</div>}
                         </div>
-                        <button className="delete-btn" onClick={() => deleteEntry(entry.id)}>×</button>
+                        <div className="entry-actions">
+                          <button className="edit-btn" onClick={() => startEdit(entry)} title="Edit">✎</button>
+                          <button className="delete-btn" onClick={() => deleteEntry(entry.id)} title="Delete">×</button>
+                        </div>
                       </div>
                     ))}
                   </div>
