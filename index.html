@@ -96,11 +96,16 @@
 
       async function resetPassword() {
         setResetting(true);
-        await db.auth.resetPasswordForEmail(OWNER_EMAIL, {
-          redirectTo: window.location.origin + "?reset=true",
+        setError("");
+        const { error } = await db.auth.resetPasswordForEmail(OWNER_EMAIL, {
+          redirectTo: window.location.origin + window.location.pathname + "?reset=true",
         });
-        setResetSent(true);
         setResetting(false);
+        if (error) {
+          setError(error.message || "Couldn't send the reset email. Try again in a moment.");
+          return;
+        }
+        setResetSent(true);
       }
 
       return (
@@ -195,9 +200,114 @@
       );
     }
 
+    function SetPasswordScreen({ onDone }) {
+      const [password, setPassword] = useState("");
+      const [confirm, setConfirm] = useState("");
+      const [saving, setSaving] = useState(false);
+      const [error, setError] = useState("");
+
+      async function submit(e) {
+        e.preventDefault();
+        if (password.length < 8) { setError("Use at least 8 characters."); return; }
+        if (password !== confirm) { setError("Passwords don't match."); return; }
+        setSaving(true);
+        setError("");
+        const { error } = await db.auth.updateUser({ password });
+        setSaving(false);
+        if (error) {
+          setError(error.message || "Couldn't set the password. The reset link may have expired — request a new one.");
+          return;
+        }
+        onDone();
+      }
+
+      return (
+        <div style={{ minHeight: "100vh", background: "var(--paper)", display: "flex", flexDirection: "column" }}>
+          <style>{`
+            .login-header { border-bottom: 1px solid var(--rule); padding: 16px 20px 12px; }
+            .wordmark {
+              font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
+              letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
+            }
+            .login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+            .login-card { width: 100%; max-width: 320px; }
+            .login-title {
+              font-family: 'Lora', serif; font-size: 20px; font-weight: 500;
+              color: var(--ink); margin-bottom: 8px;
+            }
+            .login-sub {
+              font-family: 'Lora', serif; font-size: 13px; font-style: italic;
+              color: var(--ink-light); margin-bottom: 28px; line-height: 1.6;
+            }
+            .login-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 24px; }
+            .login-label {
+              font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 300;
+              letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+            }
+            .login-input {
+              font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 300;
+              color: var(--ink); background: transparent;
+              border: none; outline: none;
+              border-bottom: 1px solid var(--rule);
+              padding: 6px 0 8px; letter-spacing: 0.04em;
+              transition: border-color 0.15s;
+            }
+            .login-input:focus { border-bottom-color: var(--ink-faint); }
+            .login-btn {
+              font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
+              letter-spacing: 0.1em; text-transform: uppercase;
+              color: var(--paper); background: var(--ink); border: none; cursor: pointer;
+              padding: 14px 32px; width: 100%; transition: background 0.15s; margin-top: 4px;
+            }
+            .login-btn:hover { background: #2d2d2a; }
+            .login-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
+            .login-error {
+              font-family: 'DM Mono', monospace; font-size: 11px;
+              color: var(--accent); letter-spacing: 0.03em; margin-top: 14px;
+            }
+          `}</style>
+          <div className="login-header"><span className="wordmark">Log</span></div>
+          <div className="login-body">
+            <form className="login-card" onSubmit={submit}>
+              <div className="login-title">Set a new password</div>
+              <div className="login-sub">Choose a new password for {OWNER_EMAIL}.</div>
+              <div className="login-field">
+                <span className="login-label">New password</span>
+                <input
+                  className="login-input"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); setError(""); }}
+                  autoFocus
+                />
+              </div>
+              <div className="login-field">
+                <span className="login-label">Confirm password</span>
+                <input
+                  className="login-input"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirm}
+                  onChange={e => { setConfirm(e.target.value); setError(""); }}
+                />
+              </div>
+              <button className="login-btn" type="submit" disabled={!password || !confirm || saving}>
+                {saving ? "Saving..." : "Save password"}
+              </button>
+              {error && <div className="login-error">{error}</div>}
+            </form>
+          </div>
+        </div>
+      );
+    }
+
     function App() {
       const [session, setSession] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
+      const [recovery, setRecovery] = useState(
+        () => new URLSearchParams(window.location.search).get("reset") === "true"
+      );
       const [entries, setEntries] = useState([]);
       const [loading, setLoading] = useState(true);
       const [saving, setSaving] = useState(false);
@@ -242,7 +352,8 @@
           } else { setSession(session); }
           setAuthLoading(false);
         });
-        const { data: { subscription } } = db.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = db.auth.onAuthStateChange((event, session) => {
+          if (event === "PASSWORD_RECOVERY") setRecovery(true);
           if (session && session.user.email !== OWNER_EMAIL) {
             db.auth.signOut(); setSession(null);
           } else { setSession(session); }
@@ -343,6 +454,12 @@
         <div style={{ minHeight: "100vh", background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "var(--ink-faint)", letterSpacing: "0.08em" }}>Loading...</span>
         </div>
+      );
+      if (recovery) return (
+        <SetPasswordScreen onDone={() => {
+          setRecovery(false);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }} />
       );
       if (!session) return <LoginScreen />;
 
