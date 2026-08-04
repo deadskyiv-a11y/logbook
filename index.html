@@ -194,10 +194,15 @@
     }
     .tab-bar { border-bottom: 1px solid var(--rule); padding: 0 var(--rhythm-page); }
     .tab-bar .bar-inner { align-items: center; justify-content: flex-start; }
+    /* Four tabs plus Search is tight at 320px; let the row scroll rather than
+       wrap or clip. */
+    .tab-bar .bar-inner { overflow-x: auto; scrollbar-width: none; }
+    .tab-bar .bar-inner::-webkit-scrollbar { display: none; }
     .tab {
       font-family: var(--font-ui); font-size: 10.5px; font-weight: 400;
       letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint);
-      padding: var(--s3) 0 11px; margin-right: 22px; cursor: pointer;
+      padding: var(--s3) 0 11px; margin-right: 17px; cursor: pointer;
+      white-space: nowrap; flex-shrink: 0;
       border: none; border-bottom: 2px solid transparent;
       background: none; transition: color 0.15s, border-color 0.15s;
     }
@@ -205,12 +210,21 @@
     .search-toggle {
       font-family: var(--font-ui); font-size: 10.5px; font-weight: 400;
       letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint);
-      padding: var(--s3) 0 11px; margin-left: auto;
+      padding: var(--s3) 0 11px; margin-left: auto; padding-left: var(--s3);
+      white-space: nowrap; flex-shrink: 0;
       cursor: pointer; border: none; border-bottom: 2px solid transparent;
       background: none; transition: color 0.15s, border-color 0.15s;
       display: flex; align-items: center; gap: var(--s1);
     }
     .search-toggle.open { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+    /* Four tabs plus Search overflows a 320px screen at full size, which pushes
+       Search out of sight. Tighten rather than let it scroll away. */
+    @media (max-width: 360px) {
+      .tab, .search-toggle { font-size: 9.5px; letter-spacing: 0.05em; }
+      .tab { margin-right: 13px; }
+      .header-right { gap: var(--s2); }
+      :root { --rhythm-page: var(--s4); }
+    }
     .search-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--danger); flex-shrink: 0; }
 
     /* ─────────────────────────────  Filters  ───────────────────────────── */
@@ -390,6 +404,48 @@
       font-family: var(--font-prose); font-size: var(--t-body); line-height: var(--lh-loose);
     }
 
+    /* ─────────────────────────────  Calendar  ─────────────────────────────
+       Date numbers sit above the swatch rather than on it: cell colours are
+       arbitrary, so no single number colour would stay legible on all of them. */
+    .cal-panel {
+      max-width: var(--measure); margin: 0 auto;
+      padding: var(--s5) var(--rhythm-page) calc(var(--s9) + env(safe-area-inset-bottom));
+    }
+    .cal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s5); }
+    .cal-title { font-family: var(--font-prose); font-size: var(--t-title); }
+    .cal-nav { display: flex; gap: var(--s1); }
+    .cal-nav button {
+      width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+      background: none; border: 1px solid var(--rule); color: var(--ink);
+      font-size: var(--t-ui); cursor: pointer; transition: border-color 0.15s;
+    }
+    .cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s1); margin-bottom: var(--s2); }
+    .cal-dow span {
+      font-family: var(--font-ui); font-size: 8.5px; font-weight: 500;
+      letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); text-align: center;
+    }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s1); }
+    .cal-cell {
+      background: none; border: none; padding: 0; cursor: pointer;
+      display: flex; flex-direction: column; gap: 3px; align-items: stretch;
+    }
+    .cal-cell:disabled, .cal-cell.empty { cursor: default; }
+    .cal-num { font-family: var(--font-ui); font-size: 10px; color: var(--faint); text-align: center; }
+    .cal-cell.today .cal-num, .cal-cell.selected .cal-num { color: var(--ink); font-weight: 500; }
+    .cal-swatch {
+      height: 28px; display: flex; flex-direction: column;
+      border: 1px solid var(--rule); overflow: hidden;
+    }
+    .cal-cell.has .cal-swatch { border-color: transparent; }
+    .cal-cell.selected .cal-swatch { outline: 2px solid var(--ink); outline-offset: 1px; }
+    .cal-cell.today .cal-swatch { border-color: var(--ink); }
+    .cal-stripe { flex: 1 1 0; min-height: 0; }
+    .cal-foot {
+      margin-top: var(--s5); font-family: var(--font-ui); font-size: 9.5px;
+      color: var(--faint); letter-spacing: 0.04em;
+      display: flex; justify-content: space-between; gap: var(--s3);
+    }
+
     /* ─────────────────────────────  Looking back  ───────────────────────────── */
     .lookback { background: var(--quiet); }
     .lookback-toggle {
@@ -430,6 +486,8 @@
       .cancel-edit-btn:hover { color: var(--danger); }
       .tag-suggest button:hover { background: var(--quiet); }
       .lookback-toggle:hover { opacity: 0.75; }
+      .cal-nav button:hover { border-color: var(--ink); }
+      .cal-cell:not(.empty):hover .cal-swatch { outline: 1px solid var(--faint); outline-offset: 1px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -521,6 +579,39 @@
       return Array.from(buckets.entries())
         .sort((a, b) => a[0] - b[0])
         .map(([monthsAgo, items]) => ({ monthsAgo, label: agoLabel(monthsAgo), entries: items }));
+    }
+
+    // Monday-first, padded to whole weeks with nulls. Kept pure so the leading
+    // blanks and month lengths are assertable.
+    function monthGrid(year, month) {
+      const lead = (new Date(year, month, 1).getDay() + 6) % 7;
+      const days = new Date(year, month + 1, 0).getDate();
+      const cells = [];
+      for (let i = 0; i < lead; i++) cells.push(null);
+      for (let d = 1; d <= days; d++) cells.push(new Date(year, month, d));
+      while (cells.length % 7) cells.push(null);
+      return cells;
+    }
+
+    // Chronological within each day, so a cell's stripes run in the order the
+    // entries were written rather than the feed's newest-first order.
+    function entriesByDay(entries) {
+      const map = new Map();
+      entries.forEach(entry => {
+        const key = new Date(entry.timestamp).toDateString();
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(entry);
+      });
+      map.forEach(list => list.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+      return map;
+    }
+
+    function addMonths(date, n) {
+      return new Date(date.getFullYear(), date.getMonth() + n, 1);
+    }
+
+    function formatMonth(date) {
+      return date.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
     }
 
     function isoDay(date) {
@@ -770,6 +861,27 @@
       ok("compose preview survives saving", previewed === afterSave);
       ok("draft colour respects its neighbour",
         previewed !== assignPostColours([draft, ...existing]).get(existing[0].id).bg);
+      // August 2026 starts on a Saturday, so Monday-first needs five blanks.
+      const aug = monthGrid(2026, 7);
+      ok("monthGrid pads to whole weeks", aug.length % 7 === 0);
+      ok("monthGrid leads with 5 blanks for Aug 2026", aug.slice(0, 5).every(c => c === null) && aug[5] !== null);
+      ok("monthGrid first cell is the 1st", aug[5].getDate() === 1);
+      ok("monthGrid has 31 days", aug.filter(Boolean).length === 31);
+      const feb = monthGrid(2024, 1);
+      ok("monthGrid handles a leap February", feb.filter(Boolean).length === 29);
+
+      const dayed = entriesByDay([
+        { id: "b", timestamp: new Date(2026, 7, 4, 18, 0).toISOString() },
+        { id: "a", timestamp: new Date(2026, 7, 4, 6, 0).toISOString() },
+        { id: "c", timestamp: new Date(2026, 7, 5, 9, 0).toISOString() },
+      ]);
+      ok("entriesByDay buckets by day", dayed.size === 2);
+      ok("entriesByDay sorts a day chronologically",
+        dayed.get(new Date(2026, 7, 4).toDateString()).map(e => e.id).join("") === "ab");
+
+      ok("addMonths crosses a year boundary",
+        addMonths(new Date(2026, 11, 1), 1).getFullYear() === 2027);
+
       ok("newId returns distinct ids", newId() !== newId());
       ok("newId looks like a uuid", /^[0-9a-f-]{36}$/.test(newId()));
 
@@ -957,6 +1069,8 @@
       const [filterDateTo, setFilterDateTo] = useState("");
       const [lookbackOpen, setLookbackOpen] = useState(false);
       const [draftId, setDraftId] = useState(null);
+      const [calMonth, setCalMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+      const touchX = useRef(null);
       const [theme, cycleTheme] = useTheme();
       const textRef = useRef(null);
       const confirmTimer = useRef(null);
@@ -998,6 +1112,30 @@
       }, [draftId, entries]);
 
       const composeColour = editingEntry ? postColours.get(editingEntry.id) : draftColour;
+
+      // Calendar reads the same unfiltered list and the same colour map as the
+      // feed, so a day's stripes always match the posts behind them.
+      const byDay = useMemo(() => entriesByDay(entries), [entries]);
+      const calCells = useMemo(
+        () => monthGrid(calMonth.getFullYear(), calMonth.getMonth()),
+        [calMonth.getFullYear(), calMonth.getMonth()]
+      );
+      const calMonthCount = calCells.reduce(
+        (n, d) => n + (d ? (byDay.get(d.toDateString()) || []).length : 0), 0);
+
+      function openDay(date) {
+        const iso = isoDay(date);
+        setFilterDateFrom(iso); setFilterDateTo(iso);
+        setFilterText(""); setFilterLocation(""); setFilterTags([]);
+        setView("log");
+      }
+      function onCalTouchStart(e) { touchX.current = e.changedTouches[0].clientX; }
+      function onCalTouchEnd(e) {
+        if (touchX.current === null) return;
+        const dx = e.changedTouches[0].clientX - touchX.current;
+        touchX.current = null;
+        if (Math.abs(dx) > 50) setCalMonth(m => addMonths(m, dx < 0 ? 1 : -1));
+      }
 
       const lookBack = useMemo(() => lookingBack(entries, now), [entries, now.toDateString()]);
       const lookBackCount = lookBack.reduce((n, g) => n + g.entries.length, 0);
@@ -1216,6 +1354,9 @@
                 <button className={`tab ${view === "write" ? "active" : ""}`} onClick={startCompose}>
                   {editingEntry ? "Editing" : "+ New"}
                 </button>
+                <button className={`tab ${view === "calendar" ? "active" : ""}`} onClick={() => setView("calendar")}>
+                  Calendar
+                </button>
                 <button
                   className={`search-toggle ${filterOpen ? "open" : ""}`}
                   onClick={() => setFilterOpen(f => !f)}
@@ -1369,6 +1510,53 @@
                 <button className="text-btn cancel-edit-btn" onClick={cancelEdit}>cancel</button>
               )}
             </div>
+            </div>
+          )}
+
+          {view === "calendar" && (
+            <div className="cal-panel" onTouchStart={onCalTouchStart} onTouchEnd={onCalTouchEnd}>
+              <div className="cal-head">
+                <span className="cal-title">{formatMonth(calMonth)}</span>
+                <div className="cal-nav">
+                  <button onClick={() => setCalMonth(m => addMonths(m, -1))} title="Previous month">‹</button>
+                  <button onClick={() => setCalMonth(m => addMonths(m, 1))} title="Next month">›</button>
+                </div>
+              </div>
+              <div className="cal-dow">
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => <span key={d}>{d}</span>)}
+              </div>
+              <div className="cal-grid">
+                {calCells.map((date, i) => {
+                  if (!date) return <span key={"blank" + i} className="cal-cell empty" />;
+                  const dayEntries = byDay.get(date.toDateString()) || [];
+                  const isToday = date.toDateString() === now.toDateString();
+                  const isSelected = filterDateFrom === isoDay(date) && filterDateTo === isoDay(date);
+                  return (
+                    <button
+                      key={date.toDateString()}
+                      className={`cal-cell ${dayEntries.length ? "has" : ""} ${isToday ? "today" : ""} ${isSelected ? "selected" : ""}`}
+                      onClick={() => dayEntries.length && openDay(date)}
+                      disabled={!dayEntries.length}
+                      title={dayEntries.length
+                        ? `${formatDate(date)} — ${dayEntries.length} ${dayEntries.length === 1 ? "entry" : "entries"}`
+                        : formatDate(date)}
+                    >
+                      <span className="cal-num">{date.getDate()}</span>
+                      <span className="cal-swatch">
+                        {dayEntries.map(entry => {
+                          const c = postColours.get(entry.id);
+                          return <span key={entry.id} className="cal-stripe"
+                            style={{ background: c ? c.bg : "transparent" }} />;
+                        })}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="cal-foot">
+                <span>{calMonthCount} {calMonthCount === 1 ? "entry" : "entries"} this month</span>
+                <span>Tap a day to open it</span>
+              </div>
             </div>
           )}
 
