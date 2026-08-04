@@ -6,6 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Log" />
+  <meta name="theme-color" content="#faf9f6" />
   <title>Log</title>
   <link rel="icon" type="image/x-icon" href="favicon/favicon.ico" />
   <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16.png" />
@@ -21,6 +22,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.4/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script>
+    // Resolve and apply the theme before first paint, so a dark load never flashes light.
+    try {
+      var pref = localStorage.getItem("log-theme") || "auto";
+      var dark = pref === "dark" || (pref === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    } catch (e) {}
     window.addEventListener('error', function() {
       var root = document.getElementById('root');
       if (!root.hasChildNodes()) {
@@ -29,14 +36,11 @@
     });
   </script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #faf9f6;
-      font-family: 'Lora', Georgia, serif;
-      -webkit-tap-highlight-color: transparent;
-    }
+    /* ─────────────────────────────  Theme  ───────────────────────────── */
     :root {
+      color-scheme: light dark;
       --paper: #faf9f6;
+      --paper-raised: #f3f1ea;
       --ink: #1a1a18;
       --ink-light: #5c5c56;
       --ink-faint: #9a9a90;
@@ -44,18 +48,364 @@
       --accent: #c0392b;
       --accent-soft: #f0e8e6;
     }
+    /* data-theme always holds the *resolved* theme — "auto" is resolved to
+       light or dark in JS, so the dark palette lives in exactly one place.
+       --accent lightens: the light red doesn't hold contrast on a dark ground. */
+    :root[data-theme="dark"] {
+      --paper: #141412;
+      --paper-raised: #1e1d1a;
+      --ink: #eae8e1;
+      --ink-light: #a5a29a;
+      --ink-faint: #6e6b64;
+      --rule: #2b2a27;
+      --accent: #e2705f;
+      --accent-soft: #3d2823;
+    }
+
+    /* ─────────────────────────────  Base  ───────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: 'Lora', Georgia, serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    ::selection { background: var(--accent-soft); color: var(--ink); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    input:focus-visible, textarea:focus-visible { outline: none; }
+
+    .wordmark {
+      font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
+      letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
+    }
+    /* Shared underline-style text field */
+    .field {
+      font-family: 'DM Mono', monospace; font-weight: 300;
+      color: var(--ink-light); background: transparent;
+      border: none; outline: none; width: 100%;
+      border-bottom: 1px solid var(--rule);
+      letter-spacing: 0.04em; transition: border-color 0.15s;
+    }
+    .field:focus { border-bottom-color: var(--ink-faint); }
+    .field::placeholder { color: var(--ink-faint); }
+    .micro-label {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+    }
+    .text-btn {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.05em; color: var(--ink-faint);
+      background: none; border: none; cursor: pointer; padding: 0;
+      transition: color 0.15s;
+    }
+    .solid-btn {
+      font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--paper); background: var(--ink); border: none; cursor: pointer;
+      padding: 14px 32px; width: 100%; transition: opacity 0.15s;
+    }
+    .solid-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
+    /* Square, not pill — the app has no rounded corners anywhere else. */
+    .chip {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.06em; color: var(--ink-light); line-height: 1;
+      background: var(--paper-raised); border: 1px solid var(--rule);
+      padding: 6px 9px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 7px;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .chip.on { color: var(--paper); background: var(--ink); border-color: var(--ink); }
+    .chip-x { font-size: 12px; line-height: 1; opacity: 0.55; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
+
+    /* ─────────────────────────────  Login  ───────────────────────────── */
+    .login-wrap { min-height: 100vh; background: var(--paper); display: flex; flex-direction: column; }
+    .login-header {
+      border-bottom: 1px solid var(--rule);
+      padding: calc(16px + env(safe-area-inset-top)) 20px 12px;
+    }
+    .login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+    .login-card { width: 100%; max-width: 320px; }
+    .login-title {
+      font-family: 'Lora', serif; font-size: 20px; font-weight: 500;
+      color: var(--ink); margin-bottom: 28px;
+    }
+    .login-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 24px; }
+    .login-input { font-size: 13px; color: var(--ink); padding: 6px 0 8px; }
+    .login-input.readonly { color: var(--ink-faint); cursor: default; }
+    .login-btn { margin-top: 4px; }
+    .login-error {
+      font-family: 'DM Mono', monospace; font-size: 11px;
+      color: var(--accent); letter-spacing: 0.03em; margin-top: 14px;
+    }
+    .reset-link {
+      margin-top: 18px; display: block; text-align: center; width: 100%;
+      text-decoration: underline; text-underline-offset: 3px;
+    }
+    .reset-link:disabled { opacity: 0.5; cursor: default; }
+    .reset-sent {
+      font-family: 'Lora', serif; font-size: 13px; font-style: italic;
+      color: var(--ink-light); text-align: center; margin-top: 18px; line-height: 1.7;
+    }
+
+    /* ─────────────────────────────  Chrome  ───────────────────────────── */
+    .app-wrap { min-height: 100vh; background: var(--paper); }
+    .sticky-nav { position: sticky; top: 0; z-index: 10; background: var(--paper); }
+    .header {
+      border-bottom: 1px solid var(--rule);
+      padding: calc(16px + env(safe-area-inset-top)) 20px 12px;
+    }
+    /* Chrome shares the content column so nothing sprawls to the window edge. */
+    .bar-inner {
+      max-width: 640px; margin: 0 auto;
+      display: flex; align-items: baseline; justify-content: space-between;
+    }
+    .header-right { display: flex; align-items: baseline; gap: 14px; }
+    .live-clock {
+      font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.05em;
+      font-variant-numeric: tabular-nums;
+    }
+    .tab-bar { border-bottom: 1px solid var(--rule); padding: 0 20px; }
+    .tab-bar .bar-inner { align-items: center; justify-content: flex-start; }
+    .tab {
+      font-family: 'Lora', serif; font-size: 12px; font-weight: 400;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
+      padding: 11px 0 10px; margin-right: 24px; cursor: pointer;
+      border: none; border-bottom: 1.5px solid transparent;
+      background: none; transition: color 0.15s, border-color 0.15s;
+    }
+    .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+    .search-toggle {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
+      padding: 11px 0 10px; margin-left: auto;
+      cursor: pointer; border: none; border-bottom: 1.5px solid transparent;
+      background: none; transition: color 0.15s, border-color 0.15s;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .search-toggle.open { color: var(--ink); border-bottom-color: var(--ink); }
+    .search-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+    /* ─────────────────────────────  Filters  ───────────────────────────── */
+    /* grid-template-rows 0fr→1fr animates to the content's real height, so adding
+       rows here never needs a magic max-height kept in sync. */
+    .filter-panel {
+      display: grid; grid-template-rows: 0fr; opacity: 0;
+      border-bottom: 0 solid var(--rule);
+      transition: grid-template-rows 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+                  opacity 0.25s ease, border-color 0.38s ease;
+    }
+    .filter-panel.open { grid-template-rows: 1fr; opacity: 1; border-bottom-width: 1px; }
+    .filter-clip { overflow: hidden; min-height: 0; }
+    .filter-panel-inner { padding: 20px 20px 18px; max-width: 640px; margin: 0 auto; }
+    .filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; margin-bottom: 20px; }
+    .filter-row.full { grid-template-columns: 1fr; }
+    .filter-field { display: flex; flex-direction: column; gap: 7px; }
+    .filter-input { font-size: 11px; padding: 4px 0 6px; }
+    .filter-input[type="date"] { -webkit-appearance: none; appearance: none; }
+    .filter-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.35; cursor: pointer; }
+    .filter-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 16px; flex-wrap: wrap; margin-top: 4px;
+      padding-top: 14px; border-top: 1px solid var(--rule);
+    }
+    .filter-summary {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.04em; font-style: italic;
+    }
+    .filter-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+    .accent-btn {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.06em; color: var(--accent);
+      background: none; border: none; cursor: pointer; padding: 0;
+      opacity: 0.85; transition: opacity 0.15s;
+    }
+    .sep { color: var(--rule); font-size: 10px; }
+
+    /* ─────────────────────────────  Compose  ───────────────────────────── */
+    .write-panel {
+      padding: 28px 20px calc(40px + env(safe-area-inset-bottom));
+      max-width: 640px; margin: 0 auto;
+    }
+    .date-label {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+    }
+    .textarea {
+      width: 100%; font-family: 'Lora', serif; font-size: 17px; line-height: 1.65;
+      color: var(--ink); background: transparent; border: none; outline: none;
+      resize: none; min-height: 140px; overflow: hidden;
+      border-bottom: 1px solid var(--rule); padding-bottom: 12px; caret-color: var(--accent);
+    }
+    .textarea::placeholder { color: var(--ink-faint); font-style: italic; }
+    .location-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+    .location-input { font-size: 11px; padding: 4px 0 5px; }
+    .loc-btn {
+      font-family: 'DM Mono', monospace; font-size: 10px; color: var(--accent);
+      background: none; border: none; cursor: pointer; letter-spacing: 0.05em;
+      padding: 0; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s;
+    }
+    .tag-block { margin-top: 18px; margin-bottom: 28px; position: relative; }
+    .tag-input { font-size: 11px; padding: 4px 0 5px; margin-top: 9px; }
+    .tag-suggest {
+      position: absolute; left: 0; right: 0; top: 100%; z-index: 5;
+      background: var(--paper); border: 1px solid var(--rule); border-top: none;
+    }
+    .tag-suggest button {
+      display: block; width: 100%; text-align: left;
+      font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
+      color: var(--ink-light); letter-spacing: 0.04em;
+      background: none; border: none; cursor: pointer; padding: 8px 10px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .cancel-edit-btn { margin-top: 12px; display: block; text-align: center; width: 100%; }
+
+    /* ─────────────────────────────  Log  ───────────────────────────── */
+    .log-panel {
+      max-width: 640px; margin: 0 auto;
+      padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    }
+    .day-group { padding: 0 20px; }
+    .day-header {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
+      padding: 24px 0 10px; border-bottom: 1px solid var(--rule);
+      display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    }
+    .entry {
+      display: grid; grid-template-columns: 46px 1fr;
+      gap: 0 12px; padding: 16px 0; border-bottom: 1px solid var(--rule);
+    }
+    /* Only the just-saved entry animates. Animating every .entry made the whole
+       list re-run on each tab switch. */
+    .entry.new { animation: fadeSlide 0.3s ease, highlight 2s ease forwards; }
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes highlight {
+      0% { background: var(--accent-soft); }
+      100% { background: transparent; }
+    }
+    .entry-time {
+      font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.04em; padding-top: 3px;
+      font-variant-numeric: tabular-nums;
+    }
+    .entry-text {
+      font-family: 'Lora', serif; font-size: 15px; line-height: 1.6; color: var(--ink);
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .entry-text mark { background: var(--accent-soft); color: var(--ink); }
+    .entry-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; margin-top: 6px; }
+    .entry-location {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.04em;
+    }
+    .entry-location::before { content: '↳ '; color: var(--accent); font-size: 9px; }
+    .entry-tag {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.04em;
+      background: none; border: none; padding: 0; cursor: pointer; transition: color 0.15s;
+    }
+    /* Actions sit at the end of the meta line rather than in a fixed column:
+       a column tall enough for thumbs left dead space beside every short entry,
+       and ate width the text needed on a phone. */
+    .entry-actions { display: flex; margin-left: auto; padding-left: 12px; }
+    /* Sized for the thumb — the glyph stays small, only the hit area grows, and
+       negative margin keeps that hit area from inflating the row.
+       Resting colour is legible: :hover never fires on touch, so a hover-only
+       reveal left these invisible on the phone. */
+    .icon-btn {
+      background: none; border: none; cursor: pointer; padding: 0;
+      width: 38px; height: 38px; margin: -12px 0; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--ink-faint); opacity: 0.55; line-height: 1; transition: color 0.15s, opacity 0.15s;
+    }
+    .edit-btn { font-size: 13px; }
+    .delete-btn { font-size: 18px; }
+    .delete-btn.confirming {
+      font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.04em;
+      color: var(--accent); opacity: 1;
+    }
+    .empty-state {
+      padding: 80px 20px; text-align: center; color: var(--ink-faint);
+      font-family: 'Lora', serif; font-size: 15px; font-style: italic; line-height: 1.9;
+    }
+
+    /* ─────────────────────────────  Looking back  ───────────────────────────── */
+    .lookback { padding: 0 20px; }
+    .lookback-toggle {
+      width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
+      background: none; border: none; border-bottom: 1px solid var(--rule);
+      padding: 24px 0 10px; cursor: pointer; transition: color 0.15s;
+    }
+    .lookback-open .lookback-toggle { color: var(--ink); }
+    .lookback-group { padding-bottom: 4px; }
+    .lookback-label {
+      font-family: 'Lora', serif; font-size: 12px; font-style: italic;
+      color: var(--ink-faint); padding: 14px 0 2px;
+    }
+    .lookback-entry { padding: 10px 0; border-bottom: 1px solid var(--rule); display: flex; gap: 12px; }
+    .lookback-date {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
+      color: var(--ink-faint); letter-spacing: 0.04em; white-space: nowrap; padding-top: 3px;
+      flex: 0 0 58px;
+    }
+    .lookback-text {
+      font-family: 'Lora', serif; font-size: 14px; line-height: 1.55; color: var(--ink-light);
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+
+    /* ─────────────────────────────  Hover  ─────────────────────────────
+       Guarded: touch devices otherwise inherit hover-only affordances that
+       never resolve. */
+    @media (hover: hover) {
+      .solid-btn:hover:not(:disabled) { opacity: 0.85; }
+      .text-btn:hover { color: var(--ink); }
+      .signout-btn:hover { color: var(--accent); }
+      .tab:hover { color: var(--ink); }
+      .search-toggle:hover { color: var(--ink); }
+      .accent-btn:hover { opacity: 1; }
+      .loc-btn:hover { opacity: 1; }
+      .chip:hover:not(.on) { border-color: var(--ink-faint); color: var(--ink); }
+      .entry-tag:hover { color: var(--accent); }
+      .icon-btn:hover { opacity: 1; color: var(--ink); }
+      .delete-btn:hover { color: var(--accent); }
+      .cancel-edit-btn:hover { color: var(--accent); }
+      .tag-suggest button:hover { background: var(--paper-raised); color: var(--ink); }
+      .lookback-toggle:hover { color: var(--ink); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
     const SUPABASE_URL = "https://ifnfoxgqugtilyergnsb.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmbmZveGdxdWd0aWx5ZXJnbnNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNDEzMDUsImV4cCI6MjA5NTcxNzMwNX0.-ceyZylPUMEj6Z13vPET7xFq5Zm1tUlz4OeYlvVBPYU";
     const OWNER_EMAIL = "deadskyiv@gmail.com";
+    const DARK_PAPER = "#141412";
+    const LIGHT_PAPER = "#faf9f6";
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // localStorage throws in some private-browsing contexts; a throw here would
+    // white-screen the whole app, so both sides are guarded.
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    };
+
+    /* ─────────────────────────  Pure helpers  ───────────────────────── */
 
     function formatTime(date) {
       return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -63,6 +413,10 @@
 
     function formatDate(date) {
       return date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    }
+
+    function formatShortDate(date) {
+      return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     }
 
     function groupByDate(entries) {
@@ -73,6 +427,242 @@
         groups[key].push(entry);
       });
       return groups;
+    }
+
+    function normalizeTag(raw) {
+      return String(raw).trim().replace(/^#+/, "").replace(/\s+/g, " ").toLowerCase().slice(0, 32);
+    }
+
+    function parseTags(raw) {
+      return String(raw).split(",").map(normalizeTag).filter(Boolean);
+    }
+
+    function mergeTags(existing, raw) {
+      const out = existing.slice();
+      parseTags(raw).forEach(t => { if (!out.includes(t)) out.push(t); });
+      return out;
+    }
+
+    function agoLabel(monthsAgo) {
+      if (monthsAgo === 1) return "Last month";
+      if (monthsAgo < 12) return monthsAgo + " months ago";
+      if (monthsAgo === 12) return "A year ago";
+      const years = Math.floor(monthsAgo / 12);
+      if (monthsAgo % 12 === 0) return years + " years ago";
+      return years === 1 ? "Over a year ago" : "Over " + years + " years ago";
+    }
+
+    // Same day-of-month, an earlier month or year. Strict "same date, previous
+    // year" would show nothing until this logbook is a year old; generalising to
+    // months makes it useful now and collapses to the classic behaviour later.
+    function lookingBack(entries, now) {
+      const day = now.getDate();
+      const buckets = new Map();
+      entries.forEach(entry => {
+        const d = new Date(entry.timestamp);
+        if (d.getDate() !== day) return;
+        const monthsAgo = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+        if (monthsAgo <= 0) return;
+        if (!buckets.has(monthsAgo)) buckets.set(monthsAgo, []);
+        buckets.get(monthsAgo).push(entry);
+      });
+      return Array.from(buckets.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([monthsAgo, items]) => ({ monthsAgo, label: agoLabel(monthsAgo), entries: items }));
+    }
+
+    function isoDay(date) {
+      const pad = n => String(n).padStart(2, "0");
+      return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate());
+    }
+
+    // Returns [from, to] as yyyy-mm-dd, feeding the existing date filter state.
+    function presetRange(kind, now) {
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      if (kind === "today") return [isoDay(today), isoDay(today)];
+      if (kind === "week") {
+        const start = new Date(today);
+        start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // week starts Monday
+        return [isoDay(start), isoDay(today)];
+      }
+      if (kind === "month") return [isoDay(new Date(now.getFullYear(), now.getMonth(), 1)), isoDay(today)];
+      if (kind === "year") return [isoDay(new Date(now.getFullYear(), 0, 1)), isoDay(today)];
+      return ["", ""];
+    }
+
+    // Splits text into plain strings and { match } objects. Deliberately NOT
+    // building an HTML string: entry text is user prose and may contain "<".
+    function highlightParts(text, query) {
+      const q = String(query || "").trim();
+      if (!q) return [text];
+      const haystack = text.toLowerCase();
+      const needle = q.toLowerCase();
+      const parts = [];
+      let i = 0;
+      while (i <= text.length) {
+        const at = haystack.indexOf(needle, i);
+        if (at === -1) { if (i < text.length) parts.push(text.slice(i)); break; }
+        if (at > i) parts.push(text.slice(i, at));
+        parts.push({ match: text.slice(at, at + q.length) });
+        i = at + q.length;
+      }
+      return parts;
+    }
+
+    function toMarkdown(entries) {
+      const grouped = groupByDate(entries);
+      const days = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
+      const out = ["# Log", ""];
+      days.forEach(key => {
+        out.push("## " + formatDate(new Date(key)), "");
+        // Chronological within a day — an exported journal reads forwards.
+        grouped[key].slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(entry => {
+          out.push("**" + formatTime(new Date(entry.timestamp)) + "**", "");
+          out.push(entry.text.trim(), "");
+          const meta = [];
+          if (entry.location) meta.push(entry.location);
+          if (entry.tags && entry.tags.length) meta.push(entry.tags.map(t => "#" + t).join(" "));
+          if (meta.length) out.push("_" + meta.join(" · ") + "_", "");
+        });
+      });
+      return out.join("\n");
+    }
+
+    function download(filename, mime, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: mime }));
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    /* ─────────────────────────  Self-check  ─────────────────────────
+       Runs only on ?selftest=1 — no cost on a normal load, but the date maths
+       and the highlight splitter fail loudly if they regress. */
+    function runSelfTest() {
+      const fails = [];
+      const ok = (name, cond) => { if (!cond) fails.push(name); };
+
+      ok("normalizeTag strips # and cases", normalizeTag("  #Work Trip ") === "work trip");
+      ok("parseTags splits and drops empties", JSON.stringify(parseTags("a, ,B")) === '["a","b"]');
+      ok("mergeTags dedupes", JSON.stringify(mergeTags(["a"], "A, c")) === '["a","c"]');
+
+      const now = new Date(2026, 7, 4); // 4 Aug 2026
+      const e = (y, m, d) => ({ timestamp: new Date(y, m, d, 12).toISOString(), text: "x" });
+      const lb = lookingBack([e(2026, 6, 4), e(2026, 4, 4), e(2026, 7, 4), e(2026, 7, 3), e(2025, 7, 4)], now);
+      ok("lookingBack finds 3 buckets", lb.length === 3);
+      ok("lookingBack excludes today and other days", lb.every(g => g.entries.length === 1));
+      ok("lookingBack orders nearest first", lb[0].monthsAgo === 1 && lb[2].monthsAgo === 12);
+      ok("lookingBack labels", lb[0].label === "Last month" && lb[1].label === "3 months ago" && lb[2].label === "A year ago");
+      ok("agoLabel 18mo", agoLabel(18) === "Over a year ago");
+      ok("agoLabel 24mo", agoLabel(24) === "2 years ago");
+
+      ok("presetRange today", JSON.stringify(presetRange("today", now)) === '["2026-08-04","2026-08-04"]');
+      ok("presetRange week starts Monday", presetRange("week", now)[0] === "2026-08-03");
+      ok("presetRange month", presetRange("month", now)[0] === "2026-08-01");
+      ok("presetRange year", presetRange("year", now)[0] === "2026-01-01");
+
+      ok("highlight no query", JSON.stringify(highlightParts("abc", "")) === '["abc"]');
+      const hp = highlightParts("a<b>a", "A");
+      ok("highlight splits case-insensitively", hp.length === 3 && hp[0].match === "a" && hp[1] === "<b>" && hp[2].match === "a");
+      ok("highlight leaves angle brackets intact", highlightParts("x<y", "<")[1].match === "<");
+      ok("highlight no match", JSON.stringify(highlightParts("abc", "zz")) === '["abc"]');
+
+      const md = toMarkdown([
+        { timestamp: new Date(2026, 7, 4, 9, 0).toISOString(), text: "morning", location: "Accra", tags: ["work"] },
+        { timestamp: new Date(2026, 7, 4, 8, 0).toISOString(), text: "earlier", location: "", tags: [] },
+      ]);
+      ok("markdown is chronological within a day", md.indexOf("earlier") < md.indexOf("morning"));
+      ok("markdown carries meta", md.indexOf("_Accra · #work_") !== -1);
+
+      if (fails.length) console.error("SELFTEST FAILED (" + fails.length + "):", fails);
+      else console.log("SELFTEST PASSED");
+      return fails;
+    }
+    if (new URLSearchParams(window.location.search).has("selftest")) runSelfTest();
+
+    /* ─────────────────────────  Components  ───────────────────────── */
+
+    // Holds the *preference* (auto/light/dark) but writes the resolved theme to
+    // data-theme, so the stylesheet only ever needs one dark block. Re-resolves
+    // when the system flips while the preference is "auto".
+    function useTheme() {
+      const [theme, setTheme] = useState(() => store.get("log-theme") || "auto");
+      useEffect(() => {
+        store.set("log-theme", theme);
+        const mq = window.matchMedia("(prefers-color-scheme: dark)");
+        const apply = () => {
+          const dark = theme === "dark" || (theme === "auto" && mq.matches);
+          document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", dark ? DARK_PAPER : LIGHT_PAPER);
+        };
+        apply();
+        mq.addEventListener("change", apply);
+        return () => mq.removeEventListener("change", apply);
+      }, [theme]);
+      const cycle = () => setTheme(t => (t === "auto" ? "light" : t === "light" ? "dark" : "auto"));
+      return [theme, cycle];
+    }
+
+    function TagInput({ tags, setTags, suggestions }) {
+      const [draft, setDraft] = useState("");
+      const normalized = normalizeTag(draft);
+      const matches = normalized
+        ? suggestions.filter(t => t.includes(normalized) && !tags.includes(t)).slice(0, 6)
+        : [];
+
+      function commit(raw) {
+        setTags(mergeTags(tags, raw));
+        setDraft("");
+      }
+
+      function onKeyDown(e) {
+        if (e.key === "Enter" || e.key === ",") {
+          e.preventDefault();
+          if (draft.trim()) commit(draft);
+        } else if (e.key === "Backspace" && !draft && tags.length) {
+          setTags(tags.slice(0, -1));
+        }
+      }
+
+      return (
+        <div className="tag-block">
+          <span className="micro-label">Tags</span>
+          {tags.length > 0 && (
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              {tags.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  className="chip"
+                  onClick={() => setTags(tags.filter(t => t !== tag))}
+                  title={"Remove " + tag}
+                >
+                  {tag}<span className="chip-x">×</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            className="field tag-input"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={onKeyDown}
+            onBlur={() => { if (draft.trim()) commit(draft); }}
+            placeholder="Add a tag, press enter"
+          />
+          {matches.length > 0 && (
+            <div className="tag-suggest">
+              {matches.map(tag => (
+                <button key={tag} type="button" onMouseDown={e => { e.preventDefault(); commit(tag); }}>
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
     }
 
     function LoginScreen() {
@@ -104,73 +694,21 @@
       }
 
       return (
-        <div style={{ minHeight: "100vh", background: "var(--paper)", display: "flex", flexDirection: "column" }}>
-          <style>{`
-            .login-header { border-bottom: 1px solid var(--rule); padding: 16px 20px 12px; }
-            .wordmark {
-              font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
-              letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
-            }
-            .login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
-            .login-card { width: 100%; max-width: 320px; }
-            .login-title {
-              font-family: 'Lora', serif; font-size: 20px; font-weight: 500;
-              color: var(--ink); margin-bottom: 28px;
-            }
-            .login-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 24px; }
-            .login-label {
-              font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 300;
-              letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
-            }
-            .login-input {
-              font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 300;
-              color: var(--ink); background: transparent;
-              border: none; outline: none;
-              border-bottom: 1px solid var(--rule);
-              padding: 6px 0 8px; letter-spacing: 0.04em;
-              transition: border-color 0.15s;
-            }
-            .login-input:focus { border-bottom-color: var(--ink-faint); }
-            .login-input.readonly { color: var(--ink-faint); cursor: default; }
-            .login-btn {
-              font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
-              letter-spacing: 0.1em; text-transform: uppercase;
-              color: var(--paper); background: var(--ink); border: none; cursor: pointer;
-              padding: 14px 32px; width: 100%; transition: background 0.15s; margin-top: 4px;
-            }
-            .login-btn:hover { background: #2d2d2a; }
-            .login-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
-            .login-error {
-              font-family: 'DM Mono', monospace; font-size: 11px;
-              color: var(--accent); letter-spacing: 0.03em; margin-top: 14px;
-            }
-            .reset-link {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              letter-spacing: 0.05em; color: var(--ink-faint);
-              background: none; border: none; cursor: pointer; padding: 0;
-              margin-top: 18px; display: block; text-align: center;
-              transition: color 0.15s; text-decoration: underline;
-              text-underline-offset: 3px;
-            }
-            .reset-link:hover { color: var(--ink); }
-            .reset-link:disabled { opacity: 0.5; cursor: default; }
-            .reset-sent {
-              font-family: 'Lora', serif; font-size: 13px; font-style: italic;
-              color: var(--ink-light); text-align: center; margin-top: 18px; line-height: 1.7;
-            }
-          `}</style>
+        <div className="login-wrap">
+          {/* No .bar-inner here — the sign-in card centres on the viewport, not
+              on the log's content column, so a 640px header would sit off-axis. */}
           <div className="login-header"><span className="wordmark">Log</span></div>
           <div className="login-body">
             <form className="login-card" onSubmit={signIn}>
               <div className="login-title">Sign in</div>
               <div className="login-field">
-                <span className="login-label">Email</span>
-                <input className="login-input readonly" type="email" value={OWNER_EMAIL} readOnly />
+                <span className="micro-label">Email</span>
+                <input className="field login-input readonly" type="email" value={OWNER_EMAIL} readOnly />
               </div>
               <div className="login-field">
-                <span className="login-label">Password</span>
+                <span className="micro-label">Password</span>
                 <input
-                  className="login-input"
+                  className="field login-input"
                   type="password"
                   placeholder="••••••••"
                   value={password}
@@ -178,14 +716,14 @@
                   autoFocus
                 />
               </div>
-              <button className="login-btn" type="submit" disabled={!password || loading}>
+              <button className="solid-btn login-btn" type="submit" disabled={!password || loading}>
                 {loading ? "Signing in..." : "Sign in"}
               </button>
               {error && <div className="login-error">{error}</div>}
               {resetSent ? (
                 <div className="reset-sent">Password reset email sent.<br />Check your inbox.</div>
               ) : (
-                <button type="button" className="reset-link" onClick={resetPassword} disabled={resetting}>
+                <button type="button" className="text-btn reset-link" onClick={resetPassword} disabled={resetting}>
                   {resetting ? "Sending..." : "Forgot password?"}
                 </button>
               )}
@@ -203,23 +741,30 @@
       const [saving, setSaving] = useState(false);
       const [text, setText] = useState("");
       const [location, setLocation] = useState("");
+      const [tags, setTags] = useState([]);
       const [locLoading, setLocLoading] = useState(false);
       const [now, setNow] = useState(new Date());
       const [justAdded, setJustAdded] = useState(null);
+      const [confirmDelete, setConfirmDelete] = useState(null);
       const [view, setView] = useState("log");
       const [editingEntry, setEditingEntry] = useState(null);
       const [filterOpen, setFilterOpen] = useState(false);
       const [filterText, setFilterText] = useState("");
       const [filterLocation, setFilterLocation] = useState("");
+      const [filterTags, setFilterTags] = useState([]);
       const [filterDateFrom, setFilterDateFrom] = useState("");
       const [filterDateTo, setFilterDateTo] = useState("");
+      const [lookbackOpen, setLookbackOpen] = useState(false);
+      const [theme, cycleTheme] = useTheme();
       const textRef = useRef(null);
+      const confirmTimer = useRef(null);
 
-      const hasActiveFilters = !!(filterText || filterLocation || filterDateFrom || filterDateTo);
+      const hasActiveFilters = !!(filterText || filterLocation || filterTags.length || filterDateFrom || filterDateTo);
 
       const filteredEntries = entries.filter(entry => {
         if (filterText && !entry.text.toLowerCase().includes(filterText.toLowerCase())) return false;
         if (filterLocation && !(entry.location || "").toLowerCase().includes(filterLocation.toLowerCase())) return false;
+        if (filterTags.length && !filterTags.every(t => (entry.tags || []).includes(t))) return false;
         if (filterDateFrom) {
           const from = new Date(filterDateFrom); from.setHours(0, 0, 0, 0);
           if (new Date(entry.timestamp) < from) return false;
@@ -231,8 +776,43 @@
         return true;
       });
 
+      // Derived from the entries already in hand — no second table, no extra query.
+      const allTags = useMemo(() => {
+        const set = new Set();
+        entries.forEach(e => (e.tags || []).forEach(t => set.add(t)));
+        return Array.from(set).sort();
+      }, [entries]);
+
+      const lookBack = useMemo(() => lookingBack(entries, now), [entries, now.toDateString()]);
+      const lookBackCount = lookBack.reduce((n, g) => n + g.entries.length, 0);
+
+      const activePreset = ["today", "week", "month", "year"].find(kind => {
+        const [from, to] = presetRange(kind, now);
+        return filterDateFrom === from && filterDateTo === to;
+      });
+
+      function applyPreset(kind) {
+        if (activePreset === kind) { setFilterDateFrom(""); setFilterDateTo(""); return; }
+        const [from, to] = presetRange(kind, now);
+        setFilterDateFrom(from); setFilterDateTo(to);
+      }
+
       function clearFilters() {
-        setFilterText(""); setFilterLocation(""); setFilterDateFrom(""); setFilterDateTo("");
+        setFilterText(""); setFilterLocation(""); setFilterTags([]);
+        setFilterDateFrom(""); setFilterDateTo("");
+      }
+
+      function toggleFilterTag(tag) {
+        setFilterTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+      }
+
+      function exportEntries(format) {
+        const stamp = isoDay(new Date());
+        if (format === "json") {
+          download("log-" + stamp + ".json", "application/json", JSON.stringify(filteredEntries, null, 2));
+        } else {
+          download("log-" + stamp + ".md", "text/markdown", toMarkdown(filteredEntries));
+        }
       }
 
       useEffect(() => {
@@ -265,6 +845,16 @@
         fetchEntries();
       }, [session]);
 
+      // Grow the compose box to its content instead of scrolling inside a fixed height.
+      useEffect(() => {
+        const el = textRef.current;
+        if (!el || view !== "write") return;
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
+      }, [text, view]);
+
+      useEffect(() => () => clearTimeout(confirmTimer.current), []);
+
       function getLocation() {
         if (!navigator.geolocation) { setLocation("Geolocation not supported"); return; }
         setLocLoading(true);
@@ -292,37 +882,41 @@
         );
       }
 
+      function startCompose() {
+        setEditingEntry(null);
+        setText(""); setLocation(""); setTags([]);
+        setView("write");
+        setTimeout(() => textRef.current?.focus(), 80);
+      }
+
       function startEdit(entry) {
         setEditingEntry(entry);
         setText(entry.text);
         setLocation(entry.location || "");
+        setTags(entry.tags || []);
         setView("write");
         setTimeout(() => textRef.current?.focus(), 80);
       }
 
       function cancelEdit() {
         setEditingEntry(null);
-        setText(""); setLocation("");
+        setText(""); setLocation(""); setTags([]);
         setView("log");
       }
 
       async function addEntry() {
         if (!text.trim() || saving) return;
         setSaving(true);
+        const payload = { text: text.trim(), location: location.trim(), tags };
         if (editingEntry) {
           const { data, error } = await db
-            .from("entries")
-            .update({ text: text.trim(), location: location.trim() })
-            .eq("id", editingEntry.id)
+            .from("entries").update(payload).eq("id", editingEntry.id)
             .select().single();
-          if (!error && data) {
-            setEntries(prev => prev.map(e => e.id === data.id ? data : e));
-          }
+          if (!error && data) setEntries(prev => prev.map(e => e.id === data.id ? data : e));
           setEditingEntry(null);
         } else {
-          const timestamp = new Date().toISOString();
           const { data, error } = await db
-            .from("entries").insert({ timestamp, text: text.trim(), location: location.trim() })
+            .from("entries").insert({ ...payload, timestamp: new Date().toISOString() })
             .select().single();
           if (!error && data) {
             setEntries(prev => [data, ...prev]);
@@ -330,13 +924,37 @@
             setTimeout(() => setJustAdded(null), 2000);
           }
         }
-        setText(""); setLocation(""); setView("log"); setSaving(false);
+        setText(""); setLocation(""); setTags([]); setView("log"); setSaving(false);
+      }
+
+      // Two-step inline confirm rather than window.confirm — a system modal is
+      // jarring in an app otherwise typeset this carefully.
+      function requestDelete(id) {
+        clearTimeout(confirmTimer.current);
+        if (confirmDelete !== id) {
+          setConfirmDelete(id);
+          confirmTimer.current = setTimeout(() => setConfirmDelete(null), 3000);
+          return;
+        }
+        setConfirmDelete(null);
+        deleteEntry(id);
       }
 
       async function deleteEntry(id) {
-        if (!window.confirm("Delete this entry?")) return;
         const { error } = await db.from("entries").delete().eq("id", id);
         if (!error) setEntries(prev => prev.filter(e => e.id !== id));
+      }
+
+      function filterByTag(tag) {
+        setFilterTags(prev => prev.includes(tag) ? prev : [...prev, tag]);
+        setFilterOpen(true);
+        setView("log");
+      }
+
+      function renderText(value) {
+        return highlightParts(value, filterText).map((part, i) =>
+          typeof part === "string" ? part : <mark key={i}>{part.match}</mark>
+        );
       }
 
       if (authLoading) return (
@@ -348,6 +966,7 @@
 
       const grouped = groupByDate(filteredEntries);
       const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
+      const showLookback = !hasActiveFilters && lookBackCount > 0;
 
       const entriesTabLabel = entries.length === 0
         ? "Entries"
@@ -356,291 +975,135 @@
           : `Entries (${entries.length})`;
 
       return (
-        <div style={{ minHeight: "100vh", background: "var(--paper)" }}>
-          <style>{`
-            .sticky-nav {
-              position: sticky; top: 0; z-index: 10;
-              background: var(--paper);
-            }
-            .header {
-              border-bottom: 1px solid var(--rule);
-              padding: 16px 20px 12px;
-              display: flex; align-items: baseline; justify-content: space-between;
-            }
-            .wordmark {
-              font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
-              letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
-            }
-            .header-right { display: flex; align-items: baseline; gap: 16px; }
-            .live-clock {
-              font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.05em;
-            }
-            .signout-btn {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.05em;
-              background: none; border: none; cursor: pointer; padding: 0; transition: color 0.15s;
-            }
-            .signout-btn:hover { color: var(--accent); }
-            .tab-bar { display: flex; align-items: center; border-bottom: 1px solid var(--rule); padding: 0 20px; }
-            .tab {
-              font-family: 'Lora', serif; font-size: 12px; font-weight: 400;
-              letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
-              padding: 10px 0 9px; margin-right: 24px; cursor: pointer;
-              border: none; border-bottom: 1.5px solid transparent;
-              background: none; transition: color 0.15s, border-color 0.15s;
-            }
-            .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
-            .tab:hover { color: var(--ink); }
-            .search-toggle {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
-              padding: 10px 0 9px; margin-left: auto; margin-right: 0;
-              cursor: pointer; border: none; border-bottom: 1.5px solid transparent;
-              background: none; transition: color 0.15s, border-color 0.15s;
-              display: flex; align-items: center; gap: 5px;
-            }
-            .search-toggle.open { color: var(--ink); border-bottom-color: var(--ink); }
-            .search-toggle:hover { color: var(--ink); }
-            .search-pip {
-              width: 5px; height: 5px; border-radius: 50%;
-              background: var(--accent); flex-shrink: 0;
-            }
-            .filter-panel {
-              overflow: hidden;
-              max-height: 0;
-              transition: max-height 0.38s cubic-bezier(0.4, 0, 0.2, 1),
-                          opacity 0.25s ease,
-                          border-color 0.38s ease;
-              opacity: 0;
-              border-bottom: 0px solid var(--rule);
-            }
-            .filter-panel.open {
-              max-height: 320px;
-              opacity: 1;
-              border-bottom-width: 1px;
-            }
-            .filter-panel-inner {
-              padding: 20px 20px 18px;
-              max-width: 640px;
-              margin: 0 auto;
-            }
-            .filter-row {
-              display: grid; grid-template-columns: 1fr 1fr;
-              gap: 0 24px; margin-bottom: 20px;
-            }
-            .filter-row.full { grid-template-columns: 1fr; }
-            .filter-field { display: flex; flex-direction: column; gap: 7px; }
-            .filter-label {
-              font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 300;
-              letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
-            }
-            .filter-input {
-              font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
-              color: var(--ink-light); background: transparent;
-              border: none; outline: none;
-              border-bottom: 1px solid var(--rule);
-              padding: 4px 0 6px; letter-spacing: 0.04em; width: 100%;
-              transition: border-color 0.15s;
-            }
-            .filter-input:focus { border-bottom-color: var(--ink-faint); }
-            .filter-input::placeholder { color: var(--ink-faint); }
-            .filter-input[type="date"] { -webkit-appearance: none; appearance: none; color-scheme: light; }
-            .filter-input[type="date"]::-webkit-calendar-picker-indicator {
-              opacity: 0.25; cursor: pointer;
-            }
-            .filter-footer {
-              display: flex; justify-content: space-between; align-items: center;
-              margin-top: 4px;
-            }
-            .filter-summary {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.04em; font-style: italic;
-            }
-            .clear-btn {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              letter-spacing: 0.06em; color: var(--accent);
-              background: none; border: none; cursor: pointer;
-              padding: 0; opacity: 0.8; transition: opacity 0.15s;
-            }
-            .clear-btn:hover { opacity: 1; }
-            .write-panel { padding: 28px 20px 40px; max-width: 640px; margin: 0 auto; }
-            .date-label {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
-            }
-            .textarea {
-              width: 100%; font-family: 'Lora', serif; font-size: 17px; line-height: 1.65;
-              color: var(--ink); background: transparent; border: none; outline: none;
-              resize: none; min-height: 140px;
-              border-bottom: 1px solid var(--rule); padding-bottom: 12px; caret-color: var(--accent);
-            }
-            .textarea::placeholder { color: var(--ink-faint); font-style: italic; }
-            .location-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; margin-bottom: 28px; }
-            .location-input {
-              flex: 1; font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
-              color: var(--ink-light); background: transparent; border: none; outline: none;
-              border-bottom: 1px solid var(--rule); padding: 4px 0 5px; letter-spacing: 0.04em;
-            }
-            .location-input::placeholder { color: var(--ink-faint); }
-            .loc-btn {
-              font-family: 'DM Mono', monospace; font-size: 10px; color: var(--accent);
-              background: none; border: none; cursor: pointer; letter-spacing: 0.05em;
-              padding: 0; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s;
-            }
-            .loc-btn:hover { opacity: 1; }
-            .submit-btn {
-              font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
-              letter-spacing: 0.1em; text-transform: uppercase;
-              color: var(--paper); background: var(--ink); border: none; cursor: pointer;
-              padding: 14px 32px; display: block; margin-left: auto;
-              transition: background 0.15s; width: 100%;
-            }
-            .submit-btn:hover { background: #2d2d2a; }
-            .submit-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
-            .log-panel { max-width: 640px; margin: 0 auto; padding-bottom: 80px; }
-            .day-group { padding: 0 20px; }
-            .day-header {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
-              padding: 24px 0 10px; border-bottom: 1px solid var(--rule);
-              display: flex; justify-content: space-between; align-items: baseline;
-            }
-            .entry {
-              display: grid; grid-template-columns: 52px 1fr 28px;
-              gap: 0 14px; padding: 16px 0; border-bottom: 1px solid var(--rule);
-              animation: fadeSlide 0.3s ease;
-            }
-            .entry.new { animation: highlight 2s ease forwards; }
-            @keyframes fadeSlide {
-              from { opacity: 0; transform: translateY(-6px); }
-              to { opacity: 1; transform: translateY(0); }
-            }
-            @keyframes highlight {
-              0% { background: var(--accent-soft); }
-              100% { background: transparent; }
-            }
-            .entry-time {
-              font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.04em; padding-top: 2px;
-            }
-            .entry-text { font-family: 'Lora', serif; font-size: 15px; line-height: 1.6; color: var(--ink); margin-bottom: 4px; }
-            .entry-location {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              color: var(--ink-faint); letter-spacing: 0.04em;
-            }
-            .entry-location::before { content: '↳ '; color: var(--accent); font-size: 9px; }
-            .entry-actions { display: flex; flex-direction: column; align-items: center; gap: 8px; align-self: start; }
-            .edit-btn {
-              background: none; border: none; color: var(--rule);
-              cursor: pointer; font-size: 13px; line-height: 1;
-              padding: 0; transition: color 0.15s;
-            }
-            .edit-btn:hover { color: var(--ink-faint); }
-            .delete-btn {
-              background: none; border: none; color: var(--rule);
-              cursor: pointer; font-size: 18px; line-height: 1;
-              padding: 0; transition: color 0.15s;
-            }
-            .delete-btn:hover { color: var(--accent); }
-            .cancel-edit-btn {
-              font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-              letter-spacing: 0.05em; color: var(--ink-faint);
-              background: none; border: none; cursor: pointer; padding: 0;
-              margin-top: 12px; display: block; text-align: center; width: 100%;
-              transition: color 0.15s;
-            }
-            .cancel-edit-btn:hover { color: var(--accent); }
-            .empty-state {
-              padding: 80px 20px; text-align: center; color: var(--ink-faint);
-              font-family: 'Lora', serif; font-size: 15px; font-style: italic; line-height: 1.9;
-            }
-          `}</style>
-
+        <div className="app-wrap">
           <div className="sticky-nav">
             <div className="header">
-              <span className="wordmark">Log</span>
-              <div className="header-right">
-                <span className="live-clock">{formatTime(now)}</span>
-                <button className="signout-btn" onClick={() => db.auth.signOut()}>sign out</button>
+              <div className="bar-inner">
+                <span className="wordmark">Log</span>
+                <div className="header-right">
+                  <span className="live-clock">{formatTime(now)}</span>
+                  <button className="text-btn" onClick={cycleTheme} title="Light, dark or follow the system">{theme}</button>
+                  <button className="text-btn signout-btn" onClick={() => db.auth.signOut()}>sign out</button>
+                </div>
               </div>
             </div>
 
             <div className="tab-bar">
-              <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
-                {entriesTabLabel}
-              </button>
-              <button
-                className={`tab ${view === "write" ? "active" : ""}`}
-                onClick={() => { setEditingEntry(null); setText(""); setLocation(""); setView("write"); setTimeout(() => textRef.current?.focus(), 80); }}
-              >
-                {editingEntry ? "Editing" : "+ New"}
-              </button>
-              <button
-                className={`search-toggle ${filterOpen ? "open" : ""}`}
-                onClick={() => setFilterOpen(f => !f)}
-              >
-                Search
-                {hasActiveFilters && <span className="search-pip" />}
-              </button>
+              <div className="bar-inner">
+                <button className={`tab ${view === "log" ? "active" : ""}`} onClick={() => setView("log")}>
+                  {entriesTabLabel}
+                </button>
+                <button className={`tab ${view === "write" ? "active" : ""}`} onClick={startCompose}>
+                  {editingEntry ? "Editing" : "+ New"}
+                </button>
+                <button
+                  className={`search-toggle ${filterOpen ? "open" : ""}`}
+                  onClick={() => setFilterOpen(f => !f)}
+                >
+                  Search
+                  {hasActiveFilters && <span className="search-pip" />}
+                </button>
+              </div>
             </div>
 
             <div className={`filter-panel ${filterOpen ? "open" : ""}`}>
-              <div className="filter-panel-inner">
-                <div className="filter-row">
-                  <div className="filter-field">
-                    <span className="filter-label">From</span>
-                    <input
-                      type="date"
-                      className="filter-input"
-                      value={filterDateFrom}
-                      max={filterDateTo || undefined}
-                      onChange={e => setFilterDateFrom(e.target.value)}
-                    />
+              <div className="filter-clip">
+                <div className="filter-panel-inner">
+                  <div className="filter-row full" style={{ marginBottom: 18 }}>
+                    <div className="filter-field">
+                      <span className="micro-label">Period</span>
+                      <div className="chip-row" style={{ marginTop: 3 }}>
+                        {[["today", "Today"], ["week", "This week"], ["month", "This month"], ["year", "This year"]].map(([kind, label]) => (
+                          <button
+                            key={kind}
+                            className={`chip ${activePreset === kind ? "on" : ""}`}
+                            onClick={() => applyPreset(kind)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <div className="filter-field">
-                    <span className="filter-label">To</span>
-                    <input
-                      type="date"
-                      className="filter-input"
-                      value={filterDateTo}
-                      min={filterDateFrom || undefined}
-                      onChange={e => setFilterDateTo(e.target.value)}
-                    />
+                  <div className="filter-row">
+                    <div className="filter-field">
+                      <span className="micro-label">From</span>
+                      <input
+                        type="date"
+                        className="field filter-input"
+                        value={filterDateFrom}
+                        max={filterDateTo || undefined}
+                        onChange={e => setFilterDateFrom(e.target.value)}
+                      />
+                    </div>
+                    <div className="filter-field">
+                      <span className="micro-label">To</span>
+                      <input
+                        type="date"
+                        className="field filter-input"
+                        value={filterDateTo}
+                        min={filterDateFrom || undefined}
+                        onChange={e => setFilterDateTo(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="filter-row full">
-                  <div className="filter-field">
-                    <span className="filter-label">Content</span>
-                    <input
-                      type="text"
-                      className="filter-input"
-                      placeholder="Search entries..."
-                      value={filterText}
-                      onChange={e => setFilterText(e.target.value)}
-                    />
+                  <div className="filter-row full">
+                    <div className="filter-field">
+                      <span className="micro-label">Content</span>
+                      <input
+                        type="text"
+                        className="field filter-input"
+                        placeholder="Search entries..."
+                        value={filterText}
+                        onChange={e => setFilterText(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="filter-row full" style={{ marginBottom: hasActiveFilters ? 16 : 0 }}>
-                  <div className="filter-field">
-                    <span className="filter-label">Location</span>
-                    <input
-                      type="text"
-                      className="filter-input"
-                      placeholder="Search locations..."
-                      value={filterLocation}
-                      onChange={e => setFilterLocation(e.target.value)}
-                    />
+                  <div className="filter-row full">
+                    <div className="filter-field">
+                      <span className="micro-label">Location</span>
+                      <input
+                        type="text"
+                        className="field filter-input"
+                        placeholder="Search locations..."
+                        value={filterLocation}
+                        onChange={e => setFilterLocation(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
-                {hasActiveFilters && (
+                  {allTags.length > 0 && (
+                    <div className="filter-row full">
+                      <div className="filter-field">
+                        <span className="micro-label">Tags</span>
+                        <div className="chip-row" style={{ marginTop: 3 }}>
+                          {allTags.map(tag => (
+                            <button
+                              key={tag}
+                              className={`chip ${filterTags.includes(tag) ? "on" : ""}`}
+                              onClick={() => toggleFilterTag(tag)}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="filter-footer">
                     <span className="filter-summary">
-                      {filteredEntries.length} of {entries.length} {entries.length === 1 ? "entry" : "entries"}
+                      {hasActiveFilters
+                        ? `${filteredEntries.length} of ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`
+                        : `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`}
                     </span>
-                    <button className="clear-btn" onClick={clearFilters}>clear all</button>
+                    <div className="filter-actions">
+                      <button className="text-btn" onClick={() => exportEntries("markdown")}>export .md</button>
+                      <span className="sep">·</span>
+                      <button className="text-btn" onClick={() => exportEntries("json")}>.json</button>
+                      {hasActiveFilters && <span className="sep">·</span>}
+                      {hasActiveFilters && <button className="accent-btn" onClick={clearFilters}>clear all</button>}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
@@ -662,7 +1125,7 @@
               />
               <div className="location-row">
                 <input
-                  className="location-input"
+                  className="field location-input"
                   value={location}
                   onChange={e => setLocation(e.target.value)}
                   placeholder="Location (optional)"
@@ -671,17 +1134,38 @@
                   {locLoading ? "Locating..." : "Use GPS"}
                 </button>
               </div>
-              <button className="submit-btn" onClick={addEntry} disabled={!text.trim() || saving}>
+              <TagInput tags={tags} setTags={setTags} suggestions={allTags} />
+              <button className="solid-btn" onClick={addEntry} disabled={!text.trim() || saving}>
                 {saving ? "Saving..." : editingEntry ? "Save changes" : "Log it"}
               </button>
               {editingEntry && (
-                <button className="cancel-edit-btn" onClick={cancelEdit}>cancel</button>
+                <button className="text-btn cancel-edit-btn" onClick={cancelEdit}>cancel</button>
               )}
             </div>
           )}
 
           {view === "log" && (
             <div className="log-panel">
+              {showLookback && (
+                <div className={`lookback ${lookbackOpen ? "lookback-open" : ""}`}>
+                  <button className="lookback-toggle" onClick={() => setLookbackOpen(o => !o)}>
+                    <span>Looking back</span>
+                    <span>{lookBackCount} {lookBackCount === 1 ? "entry" : "entries"} {lookbackOpen ? "−" : "+"}</span>
+                  </button>
+                  {lookbackOpen && lookBack.map(group => (
+                    <div key={group.monthsAgo} className="lookback-group">
+                      <div className="lookback-label">{group.label}</div>
+                      {group.entries.map(entry => (
+                        <div key={entry.id} className="lookback-entry">
+                          <span className="lookback-date">{formatShortDate(new Date(entry.timestamp))}</span>
+                          <span className="lookback-text">{entry.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {loading ? (
                 <div className="empty-state">Loading entries...</div>
               ) : filteredEntries.length === 0 ? (
@@ -702,12 +1186,23 @@
                       <div key={entry.id} className={`entry ${justAdded === entry.id ? "new" : ""}`}>
                         <div className="entry-time">{formatTime(new Date(entry.timestamp))}</div>
                         <div>
-                          <div className="entry-text">{entry.text}</div>
-                          {entry.location && <div className="entry-location">{entry.location}</div>}
-                        </div>
-                        <div className="entry-actions">
-                          <button className="edit-btn" onClick={() => startEdit(entry)} title="Edit">✎</button>
-                          <button className="delete-btn" onClick={() => deleteEntry(entry.id)} title="Delete">×</button>
+                          <div className="entry-text">{renderText(entry.text)}</div>
+                          <div className="entry-meta">
+                            {entry.location && <span className="entry-location">{entry.location}</span>}
+                            {(entry.tags || []).map(tag => (
+                              <button key={tag} className="entry-tag" onClick={() => filterByTag(tag)}>#{tag}</button>
+                            ))}
+                            <div className="entry-actions">
+                              <button className="icon-btn edit-btn" onClick={() => startEdit(entry)} title="Edit">✎</button>
+                              <button
+                                className={`icon-btn delete-btn ${confirmDelete === entry.id ? "confirming" : ""}`}
+                                onClick={() => requestDelete(entry.id)}
+                                title={confirmDelete === entry.id ? "Tap again to delete" : "Delete"}
+                              >
+                                {confirmDelete === entry.id ? "sure?" : "×"}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ))}
