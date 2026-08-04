@@ -285,6 +285,44 @@
     }
     .cancel-edit-btn { margin-top: var(--s3); display: block; text-align: center; width: 100%; }
 
+    /* The compose screen is painted in the colour the post will keep, so what
+       you write on is what you get. --band / --band-ink come from JS. */
+    .write-band {
+      background: var(--band, var(--ground));
+      color: var(--band-ink, var(--ink));
+      min-height: calc(100vh - 100px);
+    }
+    .write-band .date-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: var(--s3); margin-bottom: var(--s4);
+    }
+    .write-band .date-label { color: inherit; opacity: 0.75; margin-bottom: 0; }
+    .colour-note {
+      font-family: var(--font-ui); font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.7;
+      white-space: nowrap;
+    }
+    .write-band .textarea,
+    .write-band .field {
+      color: inherit; caret-color: currentColor;
+      border-bottom-color: color-mix(in srgb, currentColor 30%, transparent);
+    }
+    .write-band .textarea:focus,
+    .write-band .field:focus { border-bottom-color: currentColor; }
+    .write-band .textarea::placeholder,
+    .write-band .field::placeholder { color: inherit; opacity: 0.5; }
+    .write-band .micro-label { color: inherit; opacity: 0.7; }
+    .write-band .loc-btn,
+    .write-band .text-btn { color: inherit; }
+    .write-band .chip { background: transparent; border-color: currentColor; color: inherit; }
+    .write-band .solid-btn { background: var(--band-ink); color: var(--band); }
+    .write-band .solid-btn:disabled { opacity: 0.45; }
+    .write-band .tag-suggest { background: var(--band); border-color: currentColor; }
+    .write-band .tag-suggest button { color: inherit; }
+    @media (hover: hover) {
+      .write-band .tag-suggest button:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+    }
+
     /* ─────────────────────────────  Log  ─────────────────────────────
        Posts are edge-to-edge colour bands with no gaps, so the ground is
        barely visible in the feed. --band / --band-ink come from JS. */
@@ -591,6 +629,17 @@
     ];
     const NO_REPEAT_WITHIN = 12;
 
+    // The colour is hashed from the id, so the id has to exist before the row
+    // does — otherwise the compose screen has nothing to hash and the colour
+    // would only appear after saving.
+    function newId() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+
     function hashSeed(str) {
       let h = 0;
       for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
@@ -712,6 +761,18 @@
         if (a.s > 0.15 && b.s > 0.15 && hueGap(a.h, b.h) < MIN_HUE_GAP) tooClose++;
       }
       ok("no two neighbouring bands share a hue family", tooClose === 0);
+      // The point of minting the id before insert: the colour shown while
+      // composing must be the colour the saved post keeps.
+      const existing = Array.from({ length: 9 }, (_, i) => mk("old-" + i));
+      const draft = mk("draft-1");
+      const previewed = assignPostColours([draft, ...existing]).get(draft.id).bg;
+      const afterSave = assignPostColours([draft, ...existing]).get(draft.id).bg;
+      ok("compose preview survives saving", previewed === afterSave);
+      ok("draft colour respects its neighbour",
+        previewed !== assignPostColours([draft, ...existing]).get(existing[0].id).bg);
+      ok("newId returns distinct ids", newId() !== newId());
+      ok("newId looks like a uuid", /^[0-9a-f-]{36}$/.test(newId()));
+
       ok("colour is stable for the same id",
         assignPostColours([mk("abc")]).get("abc").bg === assignPostColours([mk("abc")]).get("abc").bg);
 
@@ -895,6 +956,7 @@
       const [filterDateFrom, setFilterDateFrom] = useState("");
       const [filterDateTo, setFilterDateTo] = useState("");
       const [lookbackOpen, setLookbackOpen] = useState(false);
+      const [draftId, setDraftId] = useState(null);
       const [theme, cycleTheme] = useTheme();
       const textRef = useRef(null);
       const confirmTimer = useRef(null);
@@ -923,9 +985,19 @@
         return Array.from(set).sort();
       }, [entries]);
 
-      // Assigned over the displayed order so the no-repeat window matches what
-      // is actually on screen; the colour itself is still hashed from entry.id.
-      const postColours = useMemo(() => assignPostColours(filteredEntries), [filteredEntries]);
+      // Assigned over every entry, not the filtered view: a post's colour must
+      // not change when you search. It also makes the compose preview exact,
+      // since the draft sits at the head of this same list.
+      const postColours = useMemo(() => assignPostColours(entries), [entries]);
+
+      // Prepending the draft reproduces exactly what it will be assigned once
+      // saved — same list, same neighbours, same guards.
+      const draftColour = useMemo(() => {
+        if (!draftId) return null;
+        return assignPostColours([{ id: draftId }, ...entries]).get(draftId);
+      }, [draftId, entries]);
+
+      const composeColour = editingEntry ? postColours.get(editingEntry.id) : draftColour;
 
       const lookBack = useMemo(() => lookingBack(entries, now), [entries, now.toDateString()]);
       const lookBackCount = lookBack.reduce((n, g) => n + g.entries.length, 0);
@@ -1028,6 +1100,7 @@
 
       function startCompose() {
         setEditingEntry(null);
+        setDraftId(newId());
         setText(""); setLocation(""); setTags([]);
         setView("write");
         setTimeout(() => textRef.current?.focus(), 80);
@@ -1035,6 +1108,7 @@
 
       function startEdit(entry) {
         setEditingEntry(entry);
+        setDraftId(null);
         setText(entry.text);
         setLocation(entry.location || "");
         setTags(entry.tags || []);
@@ -1044,6 +1118,7 @@
 
       function cancelEdit() {
         setEditingEntry(null);
+        setDraftId(null);
         setText(""); setLocation(""); setTags([]);
         setView("log");
       }
@@ -1060,7 +1135,8 @@
           setEditingEntry(null);
         } else {
           const { data, error } = await db
-            .from("entries").insert({ ...payload, timestamp: new Date().toISOString() })
+            .from("entries")
+            .insert({ ...payload, id: draftId || newId(), timestamp: new Date().toISOString() })
             .select().single();
           if (!error && data) {
             setEntries(prev => [data, ...prev]);
@@ -1068,7 +1144,7 @@
             setTimeout(() => setJustAdded(null), 2000);
           }
         }
-        setText(""); setLocation(""); setTags([]); setView("log"); setSaving(false);
+        setText(""); setLocation(""); setTags([]); setDraftId(null); setView("log"); setSaving(false);
       }
 
       // Two-step inline confirm rather than window.confirm — a system modal is
@@ -1253,11 +1329,18 @@
           </div>
 
           {view === "write" && (
+            <div
+              className="write-band"
+              style={composeColour ? { "--band": composeColour.bg, "--band-ink": composeColour.ink } : undefined}
+            >
             <div className="write-panel">
-              <div className="date-label">
-                {editingEntry
-                  ? `Editing — ${formatDate(new Date(editingEntry.timestamp))}`
-                  : formatDate(now)}
+              <div className="date-row">
+                <span className="date-label">
+                  {editingEntry
+                    ? `Editing — ${formatDate(new Date(editingEntry.timestamp))}`
+                    : formatDate(now)}
+                </span>
+                {composeColour && <span className="colour-note">{composeColour.name}</span>}
               </div>
               <textarea
                 ref={textRef}
@@ -1285,6 +1368,7 @@
               {editingEntry && (
                 <button className="text-btn cancel-edit-btn" onClick={cancelEdit}>cancel</button>
               )}
+            </div>
             </div>
           )}
 
