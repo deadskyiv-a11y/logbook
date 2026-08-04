@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Log" />
-  <meta name="theme-color" content="#faf9f6" />
+  <meta name="theme-color" content="#ffffff" />
   <title>Log</title>
   <link rel="icon" type="image/x-icon" href="favicon/favicon.ico" />
   <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16.png" />
@@ -16,7 +16,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="favicon/favicon-192.png" />
   <link rel="icon" type="image/png" sizes="512x512" href="favicon/favicon-512.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Be+Vietnam+Pro:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.4/babel.min.js"></script>
@@ -31,165 +31,189 @@
     window.addEventListener('error', function() {
       var root = document.getElementById('root');
       if (!root.hasChildNodes()) {
-        root.innerHTML = '<p style="padding:40px;font-family:Georgia,serif;font-size:15px;color:#9a9a90;font-style:italic">Something went wrong loading the app.<br>Please reload the page.</p>';
+        root.innerHTML = '<p style="padding:40px;font-family:Georgia,serif;font-size:15px;color:#6e6e73">Something went wrong loading the app.<br>Please reload the page.</p>';
       }
     });
   </script>
   <style>
-    /* ─────────────────────────────  Theme  ───────────────────────────── */
+    /* ══════════════════════════  Design tokens  ══════════════════════════
+       The ground is the only thing the theme switches. Post bands carry their
+       own colour and text colour from the Pantone table in JS, injected as
+       --band / --band-ink, so they look identical on white or on black.
+
+       NOT tokenised, deliberately: optical corrections and layout constants
+       tied to a specific glyph width. Those are not rhythm.
+       ═══════════════════════════════════════════════════════════════════════ */
     :root {
       color-scheme: light dark;
-      --paper: #faf9f6;
-      --paper-raised: #f3f1ea;
-      --ink: #1a1a18;
-      --ink-light: #5c5c56;
-      --ink-faint: #9a9a90;
-      --rule: #e4e2db;
-      --accent: #c0392b;
-      --accent-soft: #f0e8e6;
+
+      --ground: #ffffff;
+      --ink: #0e0e10;
+      --faint: #6e6e73;
+      --rule: #e3e3e6;
+      --quiet: #f2f2f3;
+      --divider: #0e0e10;
+      --divider-ink: #ffffff;
+      --danger: #c0392b;
+      --focus: #0e0e10;
+
+      --font-prose: 'Instrument Serif', Georgia, serif;
+      --font-ui: 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+      --t-micro: 10px;   /* uppercase ui labels */
+      --t-meta: 11px;    /* fields, filter inputs */
+      --t-time: 12px;
+      --t-ui: 13px;      /* tabs, buttons */
+      --t-sub: 14px;     /* looking-back entries */
+      --t-body: 17px;    /* post prose */
+      --t-write: 20px;   /* compose box */
+      --t-title: 22px;   /* day headings, sign-in */
+      --lh-tight: 1.3;
+      --lh-body: 1.45;
+      --lh-loose: 1.9;
+
+      --s1: 4px;   --s2: 8px;   --s3: 12px;
+      --s4: 16px;  --s5: 20px;  --s6: 24px;
+      --s7: 32px;  --s8: 40px;  --s9: 64px;
+
+      --measure: 640px;
+      --rhythm-page: var(--s5);
     }
-    /* data-theme always holds the *resolved* theme — "auto" is resolved to
-       light or dark in JS, so the dark palette lives in exactly one place.
-       --accent lightens: the light red doesn't hold contrast on a dark ground. */
+    /* Bright ground -> dark ground. Bands are untouched by this block. */
     :root[data-theme="dark"] {
-      --paper: #141412;
-      --paper-raised: #1e1d1a;
-      --ink: #eae8e1;
-      --ink-light: #a5a29a;
-      --ink-faint: #6e6b64;
-      --rule: #2b2a27;
-      --accent: #e2705f;
-      --accent-soft: #3d2823;
+      --ground: #0e0e10;
+      --ink: #ffffff;
+      --faint: #8a8a90;
+      --rule: #26262a;
+      --quiet: #1b1b1f;
+      --divider: #ffffff;
+      --divider-ink: #0e0e10;
+      --danger: #ff6f61;
+      --focus: #ffffff;
     }
 
     /* ─────────────────────────────  Base  ───────────────────────────── */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--paper);
+      background: var(--ground);
       color: var(--ink);
-      font-family: 'Lora', Georgia, serif;
+      font-family: var(--font-ui);
       -webkit-tap-highlight-color: transparent;
     }
-    ::selection { background: var(--accent-soft); color: var(--ink); }
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    ::selection { background: var(--ink); color: var(--ground); }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
     input:focus-visible, textarea:focus-visible { outline: none; }
 
     .wordmark {
-      font-family: 'Lora', serif; font-size: 13px; font-weight: 600;
-      letter-spacing: 0.15em; text-transform: uppercase; color: var(--ink);
+      font-family: var(--font-prose); font-size: 19px;
+      letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink);
     }
-    /* Shared underline-style text field */
     .field {
-      font-family: 'DM Mono', monospace; font-weight: 300;
-      color: var(--ink-light); background: transparent;
+      font-family: var(--font-ui); font-weight: 400;
+      color: var(--ink); background: transparent;
       border: none; outline: none; width: 100%;
       border-bottom: 1px solid var(--rule);
-      letter-spacing: 0.04em; transition: border-color 0.15s;
+      letter-spacing: 0.02em; transition: border-color 0.15s;
     }
-    .field:focus { border-bottom-color: var(--ink-faint); }
-    .field::placeholder { color: var(--ink-faint); }
+    .field:focus { border-bottom-color: var(--ink); }
+    .field::placeholder { color: var(--faint); }
     .micro-label {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+      font-family: var(--font-ui); font-size: var(--t-micro); font-weight: 500;
+      letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint);
     }
     .text-btn {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.05em; color: var(--ink-faint);
+      font-family: var(--font-ui); font-size: var(--t-micro); font-weight: 400;
+      letter-spacing: 0.04em; color: var(--faint);
       background: none; border: none; cursor: pointer; padding: 0;
       transition: color 0.15s;
     }
     .solid-btn {
-      font-family: 'Lora', serif; font-size: 13px; font-weight: 500;
+      font-family: var(--font-ui); font-size: var(--t-ui); font-weight: 500;
       letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--paper); background: var(--ink); border: none; cursor: pointer;
-      padding: 14px 32px; width: 100%; transition: opacity 0.15s;
+      color: var(--ground); background: var(--ink); border: none; cursor: pointer;
+      padding: var(--s4) var(--s7); width: 100%; transition: opacity 0.15s;
     }
-    .solid-btn:disabled { background: var(--rule); color: var(--ink-faint); cursor: default; }
-    /* Square, not pill — the app has no rounded corners anywhere else. */
+    .solid-btn:disabled { background: var(--rule); color: var(--faint); cursor: default; }
     .chip {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.06em; color: var(--ink-light); line-height: 1;
-      background: var(--paper-raised); border: 1px solid var(--rule);
+      font-family: var(--font-ui); font-size: var(--t-micro); font-weight: 400;
+      letter-spacing: 0.04em; color: var(--ink); line-height: 1;
+      background: var(--quiet); border: 1px solid var(--rule);
       padding: 6px 9px; cursor: pointer;
       display: inline-flex; align-items: center; gap: 7px;
       transition: color 0.15s, border-color 0.15s, background 0.15s;
     }
-    .chip.on { color: var(--paper); background: var(--ink); border-color: var(--ink); }
-    .chip-x { font-size: 12px; line-height: 1; opacity: 0.55; }
-    .chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip.on { color: var(--ground); background: var(--ink); border-color: var(--ink); }
+    .chip-x { font-size: var(--t-time); line-height: 1; opacity: 0.55; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: var(--s2); }
 
     /* ─────────────────────────────  Login  ───────────────────────────── */
-    .login-wrap { min-height: 100vh; background: var(--paper); display: flex; flex-direction: column; }
+    .login-wrap { min-height: 100vh; background: var(--ground); display: flex; flex-direction: column; }
     .login-header {
       border-bottom: 1px solid var(--rule);
-      padding: calc(16px + env(safe-area-inset-top)) 20px 12px;
+      padding: calc(var(--s4) + env(safe-area-inset-top)) var(--rhythm-page) var(--s3);
     }
-    .login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+    .login-body { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--s8) var(--rhythm-page); }
     .login-card { width: 100%; max-width: 320px; }
     .login-title {
-      font-family: 'Lora', serif; font-size: 20px; font-weight: 500;
-      color: var(--ink); margin-bottom: 28px;
+      font-family: var(--font-prose); font-size: var(--t-title);
+      color: var(--ink); margin-bottom: var(--s7);
     }
-    .login-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 24px; }
-    .login-input { font-size: 13px; color: var(--ink); padding: 6px 0 8px; }
-    .login-input.readonly { color: var(--ink-faint); cursor: default; }
-    .login-btn { margin-top: 4px; }
+    .login-field { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s6); }
+    .login-input { font-size: var(--t-ui); padding: var(--s2) 0; }
+    .login-input.readonly { color: var(--faint); cursor: default; }
+    .login-btn { margin-top: var(--s1); }
     .login-error {
-      font-family: 'DM Mono', monospace; font-size: 11px;
-      color: var(--accent); letter-spacing: 0.03em; margin-top: 14px;
+      font-family: var(--font-ui); font-size: var(--t-meta);
+      color: var(--danger); margin-top: var(--s4);
     }
     .reset-link {
-      margin-top: 18px; display: block; text-align: center; width: 100%;
+      margin-top: var(--s5); display: block; text-align: center; width: 100%;
       text-decoration: underline; text-underline-offset: 3px;
     }
     .reset-link:disabled { opacity: 0.5; cursor: default; }
     .reset-sent {
-      font-family: 'Lora', serif; font-size: 13px; font-style: italic;
-      color: var(--ink-light); text-align: center; margin-top: 18px; line-height: 1.7;
+      font-family: var(--font-prose); font-size: var(--t-sub);
+      color: var(--faint); text-align: center; margin-top: var(--s5); line-height: var(--lh-loose);
     }
 
     /* ─────────────────────────────  Chrome  ───────────────────────────── */
-    .app-wrap { min-height: 100vh; background: var(--paper); }
-    .sticky-nav { position: sticky; top: 0; z-index: 10; background: var(--paper); }
+    .app-wrap { min-height: 100vh; background: var(--ground); }
+    .sticky-nav { position: sticky; top: 0; z-index: 10; background: var(--ground); }
     .header {
       border-bottom: 1px solid var(--rule);
-      padding: calc(16px + env(safe-area-inset-top)) 20px 12px;
+      padding: calc(var(--s5) + env(safe-area-inset-top)) var(--rhythm-page) var(--s3);
     }
-    /* Chrome shares the content column so nothing sprawls to the window edge. */
     .bar-inner {
-      max-width: 640px; margin: 0 auto;
+      max-width: var(--measure); margin: 0 auto;
       display: flex; align-items: baseline; justify-content: space-between;
     }
-    .header-right { display: flex; align-items: baseline; gap: 14px; }
+    .header-right { display: flex; align-items: baseline; gap: var(--s3); }
     .live-clock {
-      font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.05em;
+      font-family: var(--font-ui); font-size: var(--t-meta);
+      color: var(--faint); letter-spacing: 0.03em;
       font-variant-numeric: tabular-nums;
     }
-    .tab-bar { border-bottom: 1px solid var(--rule); padding: 0 20px; }
+    .tab-bar { border-bottom: 1px solid var(--rule); padding: 0 var(--rhythm-page); }
     .tab-bar .bar-inner { align-items: center; justify-content: flex-start; }
     .tab {
-      font-family: 'Lora', serif; font-size: 12px; font-weight: 400;
-      letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
-      padding: 11px 0 10px; margin-right: 24px; cursor: pointer;
-      border: none; border-bottom: 1.5px solid transparent;
+      font-family: var(--font-ui); font-size: 10.5px; font-weight: 400;
+      letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint);
+      padding: var(--s3) 0 11px; margin-right: 22px; cursor: pointer;
+      border: none; border-bottom: 2px solid transparent;
       background: none; transition: color 0.15s, border-color 0.15s;
     }
-    .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+    .tab.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
     .search-toggle {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint);
-      padding: 11px 0 10px; margin-left: auto;
-      cursor: pointer; border: none; border-bottom: 1.5px solid transparent;
+      font-family: var(--font-ui); font-size: 10.5px; font-weight: 400;
+      letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint);
+      padding: var(--s3) 0 11px; margin-left: auto;
+      cursor: pointer; border: none; border-bottom: 2px solid transparent;
       background: none; transition: color 0.15s, border-color 0.15s;
-      display: flex; align-items: center; gap: 5px;
+      display: flex; align-items: center; gap: var(--s1);
     }
-    .search-toggle.open { color: var(--ink); border-bottom-color: var(--ink); }
-    .search-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+    .search-toggle.open { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+    .search-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--danger); flex-shrink: 0; }
 
     /* ─────────────────────────────  Filters  ───────────────────────────── */
-    /* grid-template-rows 0fr→1fr animates to the content's real height, so adding
-       rows here never needs a magic max-height kept in sync. */
     .filter-panel {
       display: grid; grid-template-rows: 0fr; opacity: 0;
       border-bottom: 0 solid var(--rule);
@@ -198,186 +222,176 @@
     }
     .filter-panel.open { grid-template-rows: 1fr; opacity: 1; border-bottom-width: 1px; }
     .filter-clip { overflow: hidden; min-height: 0; }
-    .filter-panel-inner { padding: 20px 20px 18px; max-width: 640px; margin: 0 auto; }
-    .filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; margin-bottom: 20px; }
+    .filter-panel-inner { padding: var(--s5) var(--rhythm-page) var(--s5); max-width: var(--measure); margin: 0 auto; }
+    .filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s6); margin-bottom: var(--s5); }
     .filter-row.full { grid-template-columns: 1fr; }
-    .filter-field { display: flex; flex-direction: column; gap: 7px; }
-    .filter-input { font-size: 11px; padding: 4px 0 6px; }
+    .filter-field { display: flex; flex-direction: column; gap: var(--s2); }
+    .filter-input { font-size: var(--t-meta); padding: var(--s1) 0 6px; }
     .filter-input[type="date"] { -webkit-appearance: none; appearance: none; }
-    .filter-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.35; cursor: pointer; }
+    .filter-input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.45; cursor: pointer; }
     .filter-footer {
       display: flex; justify-content: space-between; align-items: center;
-      gap: 16px; flex-wrap: wrap; margin-top: 4px;
-      padding-top: 14px; border-top: 1px solid var(--rule);
+      gap: var(--s4); flex-wrap: wrap; margin-top: var(--s1);
+      padding-top: var(--s4); border-top: 1px solid var(--rule);
     }
     .filter-summary {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.04em; font-style: italic;
+      font-family: var(--font-ui); font-size: var(--t-micro);
+      color: var(--faint); letter-spacing: 0.02em;
     }
-    .filter-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+    .filter-actions { display: flex; align-items: center; gap: var(--s3); margin-left: auto; }
     .accent-btn {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.06em; color: var(--accent);
+      font-family: var(--font-ui); font-size: var(--t-micro); font-weight: 500;
+      letter-spacing: 0.04em; color: var(--danger);
       background: none; border: none; cursor: pointer; padding: 0;
-      opacity: 0.85; transition: opacity 0.15s;
+      transition: opacity 0.15s;
     }
-    .sep { color: var(--rule); font-size: 10px; }
+    .sep { color: var(--rule); font-size: var(--t-micro); }
 
     /* ─────────────────────────────  Compose  ───────────────────────────── */
     .write-panel {
-      padding: 28px 20px calc(40px + env(safe-area-inset-bottom));
-      max-width: 640px; margin: 0 auto;
+      padding: var(--s6) var(--rhythm-page) calc(var(--s8) + env(safe-area-inset-bottom));
+      max-width: var(--measure); margin: 0 auto;
     }
     .date-label {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+      font-family: var(--font-ui); font-size: 9.5px; font-weight: 500;
+      color: var(--faint); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: var(--s4);
     }
     .textarea {
-      width: 100%; font-family: 'Lora', serif; font-size: 17px; line-height: 1.65;
+      width: 100%; font-family: var(--font-prose); font-size: var(--t-write); line-height: var(--lh-body);
       color: var(--ink); background: transparent; border: none; outline: none;
-      resize: none; min-height: 140px; overflow: hidden;
-      border-bottom: 1px solid var(--rule); padding-bottom: 12px; caret-color: var(--accent);
+      resize: none; min-height: 180px; overflow: hidden;
+      border-bottom: 1px solid var(--rule); padding-bottom: var(--s3); caret-color: var(--ink);
     }
-    .textarea::placeholder { color: var(--ink-faint); font-style: italic; }
-    .location-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
-    .location-input { font-size: 11px; padding: 4px 0 5px; }
+    .textarea::placeholder { color: var(--faint); }
+    .location-row { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s4); }
+    .location-input { font-size: var(--t-meta); padding: var(--s1) 0 5px; }
     .loc-btn {
-      font-family: 'DM Mono', monospace; font-size: 10px; color: var(--accent);
-      background: none; border: none; cursor: pointer; letter-spacing: 0.05em;
-      padding: 0; white-space: nowrap; opacity: 0.85; transition: opacity 0.15s;
+      font-family: var(--font-ui); font-size: var(--t-micro); font-weight: 500;
+      color: var(--ink); background: none; border: none; cursor: pointer;
+      letter-spacing: 0.04em; padding: 0; white-space: nowrap;
+      text-decoration: underline; text-underline-offset: 3px;
     }
-    .tag-block { margin-top: 18px; margin-bottom: 28px; position: relative; }
-    .tag-input { font-size: 11px; padding: 4px 0 5px; margin-top: 9px; }
+    .tag-block { margin-top: var(--s5); margin-bottom: var(--s7); position: relative; }
+    .tag-input { font-size: var(--t-meta); padding: var(--s1) 0 5px; margin-top: var(--s2); }
     .tag-suggest {
       position: absolute; left: 0; right: 0; top: 100%; z-index: 5;
-      background: var(--paper); border: 1px solid var(--rule); border-top: none;
+      background: var(--ground); border: 1px solid var(--rule); border-top: none;
     }
     .tag-suggest button {
       display: block; width: 100%; text-align: left;
-      font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 300;
-      color: var(--ink-light); letter-spacing: 0.04em;
-      background: none; border: none; cursor: pointer; padding: 8px 10px;
-      transition: background 0.12s, color 0.12s;
+      font-family: var(--font-ui); font-size: var(--t-meta);
+      color: var(--ink); background: none; border: none; cursor: pointer;
+      padding: var(--s2) var(--s3); transition: background 0.12s;
     }
-    .cancel-edit-btn { margin-top: 12px; display: block; text-align: center; width: 100%; }
+    .cancel-edit-btn { margin-top: var(--s3); display: block; text-align: center; width: 100%; }
 
-    /* ─────────────────────────────  Log  ───────────────────────────── */
+    /* ─────────────────────────────  Log  ─────────────────────────────
+       Posts are edge-to-edge colour bands with no gaps, so the ground is
+       barely visible in the feed. --band / --band-ink come from JS. */
     .log-panel {
-      max-width: 640px; margin: 0 auto;
-      padding-bottom: calc(80px + env(safe-area-inset-bottom));
+      max-width: var(--measure); margin: 0 auto;
+      padding-bottom: calc(var(--s9) + env(safe-area-inset-bottom));
     }
-    .day-group { padding: 0 20px; }
     .day-header {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
-      padding: 24px 0 10px; border-bottom: 1px solid var(--rule);
-      display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+      background: var(--divider); color: var(--divider-ink);
+      padding: var(--s4) var(--rhythm-page) var(--s3);
+      display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
     }
-    .entry {
-      display: grid; grid-template-columns: 46px 1fr;
-      gap: 0 12px; padding: 16px 0; border-bottom: 1px solid var(--rule);
+    .day-title { font-family: var(--font-prose); font-size: var(--t-title); }
+    .day-count {
+      font-family: var(--font-ui); font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85;
     }
-    /* Only the just-saved entry animates. Animating every .entry made the whole
-       list re-run on each tab switch. */
-    .entry.new { animation: fadeSlide 0.3s ease, highlight 2s ease forwards; }
+    .post {
+      background: var(--band); color: var(--band-ink);
+      padding: var(--s4) var(--rhythm-page) 17px;
+    }
+    .post.new { animation: fadeSlide 0.3s ease; }
     @keyframes fadeSlide {
       from { opacity: 0; transform: translateY(-6px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    @keyframes highlight {
-      0% { background: var(--accent-soft); }
-      100% { background: transparent; }
-    }
-    .entry-time {
-      font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.04em; padding-top: 3px;
+    .post-time {
+      font-family: var(--font-ui); font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.82;
       font-variant-numeric: tabular-nums;
     }
-    .entry-text {
-      font-family: 'Lora', serif; font-size: 15px; line-height: 1.6; color: var(--ink);
-      white-space: pre-wrap; overflow-wrap: anywhere;
+    .post-text {
+      font-family: var(--font-prose); font-size: var(--t-body); line-height: var(--lh-body);
+      white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 7px;
     }
-    .entry-text mark { background: var(--accent-soft); color: var(--ink); }
-    .entry-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; margin-top: 6px; }
-    .entry-location {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.04em;
+    /* Inverted rather than a fixed highlight colour — guaranteed to read on
+       every one of the 28 bands. */
+    .post-text mark { background: currentColor; color: var(--band); padding: 0 2px; }
+    .post-meta {
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: var(--s1) var(--s3); margin-top: var(--s2);
+      font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.06em;
     }
-    .entry-location::before { content: '↳ '; color: var(--accent); font-size: 9px; }
-    .entry-tag {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.04em;
-      background: none; border: none; padding: 0; cursor: pointer; transition: color 0.15s;
+    .post-loc { text-transform: uppercase; opacity: 0.82; }
+    .post-tag {
+      font: inherit; font-weight: 500; color: inherit; opacity: 0.85;
+      background: none; border: none; padding: 0; cursor: pointer;
+      transition: opacity 0.15s;
     }
-    /* Actions sit at the end of the meta line rather than in a fixed column:
-       a column tall enough for thumbs left dead space beside every short entry,
-       and ate width the text needed on a phone. */
-    .entry-actions { display: flex; margin-left: auto; padding-left: 12px; }
-    /* Sized for the thumb — the glyph stays small, only the hit area grows, and
-       negative margin keeps that hit area from inflating the row.
-       Resting colour is legible: :hover never fires on touch, so a hover-only
-       reveal left these invisible on the phone. */
+    .post-actions { margin-left: auto; display: flex; padding-left: var(--s3); }
     .icon-btn {
       background: none; border: none; cursor: pointer; padding: 0;
       width: 38px; height: 38px; margin: -12px 0; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
-      color: var(--ink-faint); opacity: 0.55; line-height: 1; transition: color 0.15s, opacity 0.15s;
+      color: inherit; opacity: 0.7; line-height: 1; transition: opacity 0.15s;
     }
-    .edit-btn { font-size: 13px; }
+    .edit-btn { font-size: var(--t-ui); }
     .delete-btn { font-size: 18px; }
     .delete-btn.confirming {
-      font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: 0.04em;
-      color: var(--accent); opacity: 1;
+      font-family: var(--font-ui); font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.04em; opacity: 1; width: auto; padding: 0 var(--s1);
     }
     .empty-state {
-      padding: 80px 20px; text-align: center; color: var(--ink-faint);
-      font-family: 'Lora', serif; font-size: 15px; font-style: italic; line-height: 1.9;
+      padding: var(--s9) var(--rhythm-page); text-align: center; color: var(--faint);
+      font-family: var(--font-prose); font-size: var(--t-body); line-height: var(--lh-loose);
     }
 
     /* ─────────────────────────────  Looking back  ───────────────────────────── */
-    .lookback { padding: 0 20px; }
+    .lookback { background: var(--quiet); }
     .lookback-toggle {
-      width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
-      background: none; border: none; border-bottom: 1px solid var(--rule);
-      padding: 24px 0 10px; cursor: pointer; transition: color 0.15s;
+      width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
+      font-family: var(--font-ui); font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink);
+      background: none; border: none;
+      padding: var(--s3) var(--rhythm-page); cursor: pointer;
     }
-    .lookback-open .lookback-toggle { color: var(--ink); }
-    .lookback-group { padding-bottom: 4px; }
+    .lookback-group { padding: 0 var(--rhythm-page) var(--s2); }
     .lookback-label {
-      font-family: 'Lora', serif; font-size: 12px; font-style: italic;
-      color: var(--ink-faint); padding: 14px 0 2px;
+      font-family: var(--font-prose); font-size: var(--t-sub); font-style: italic;
+      color: var(--faint); padding: var(--s3) 0 var(--s1);
     }
-    .lookback-entry { padding: 10px 0; border-bottom: 1px solid var(--rule); display: flex; gap: 12px; }
+    .lookback-entry { padding: var(--s2) 0; border-top: 1px solid var(--rule); display: flex; gap: var(--s3); }
     .lookback-date {
-      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 300;
-      color: var(--ink-faint); letter-spacing: 0.04em; white-space: nowrap; padding-top: 3px;
+      font-family: var(--font-ui); font-size: 9.5px;
+      color: var(--faint); letter-spacing: 0.04em; white-space: nowrap; padding-top: 3px;
       flex: 0 0 58px;
     }
     .lookback-text {
-      font-family: 'Lora', serif; font-size: 14px; line-height: 1.55; color: var(--ink-light);
-      white-space: pre-wrap; overflow-wrap: anywhere;
+      font-family: var(--font-prose); font-size: var(--t-sub); line-height: var(--lh-body);
+      color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
     }
 
-    /* ─────────────────────────────  Hover  ─────────────────────────────
-       Guarded: touch devices otherwise inherit hover-only affordances that
-       never resolve. */
+    /* ─────────────────────────────  Hover  ───────────────────────────── */
     @media (hover: hover) {
       .solid-btn:hover:not(:disabled) { opacity: 0.85; }
       .text-btn:hover { color: var(--ink); }
-      .signout-btn:hover { color: var(--accent); }
+      .signout-btn:hover { color: var(--danger); }
       .tab:hover { color: var(--ink); }
       .search-toggle:hover { color: var(--ink); }
-      .accent-btn:hover { opacity: 1; }
-      .loc-btn:hover { opacity: 1; }
-      .chip:hover:not(.on) { border-color: var(--ink-faint); color: var(--ink); }
-      .entry-tag:hover { color: var(--accent); }
-      .icon-btn:hover { opacity: 1; color: var(--ink); }
-      .delete-btn:hover { color: var(--accent); }
-      .cancel-edit-btn:hover { color: var(--accent); }
-      .tag-suggest button:hover { background: var(--paper-raised); color: var(--ink); }
-      .lookback-toggle:hover { color: var(--ink); }
+      .accent-btn:hover { opacity: 0.75; }
+      .loc-btn:hover { opacity: 0.7; }
+      .chip:hover:not(.on) { border-color: var(--ink); }
+      .post-tag:hover { opacity: 1; }
+      .icon-btn:hover { opacity: 1; }
+      .cancel-edit-btn:hover { color: var(--danger); }
+      .tag-suggest button:hover { background: var(--quiet); }
+      .lookback-toggle:hover { opacity: 0.75; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -394,8 +408,8 @@
     const SUPABASE_URL = "https://ifnfoxgqugtilyergnsb.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmbmZveGdxdWd0aWx5ZXJnbnNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNDEzMDUsImV4cCI6MjA5NTcxNzMwNX0.-ceyZylPUMEj6Z13vPET7xFq5Zm1tUlz4OeYlvVBPYU";
     const OWNER_EMAIL = "deadskyiv@gmail.com";
-    const DARK_PAPER = "#141412";
-    const LIGHT_PAPER = "#faf9f6";
+    const DARK_GROUND = "#0e0e10";
+    const LIGHT_GROUND = "#ffffff";
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // localStorage throws in some private-browsing contexts; a throw here would
@@ -536,6 +550,107 @@
       setTimeout(() => URL.revokeObjectURL(url), 0);
     }
 
+
+    /* ───────────────────────  Post colour  ───────────────────────
+       Pantone Colours of the Year. Each band's text colour is pre-resolved to
+       cream or near-black so every pair clears 4.5:1 — the two marked below are
+       nudged darker because at their published value neither text colour
+       reached AA. Names are Pantone trademarks; only the hex values matter here.
+       ────────────────────────────────────────────────────────────── */
+    const BAND_CREAM = "#fff0d6";
+    const BAND_INK = "#0e0e10";
+    const PANTONE = [
+      ["Cerulean", "#9bb7d4", BAND_INK],
+      ["Fuchsia Rose", "#bd406f", BAND_CREAM],   // 5% darker than #c74375
+      ["True Red", "#bf1932", BAND_CREAM],
+      ["Aqua Sky", "#7bc4c4", BAND_INK],
+      ["Tigerlily", "#e2583e", BAND_INK],
+      ["Blue Turquoise", "#53b0ae", BAND_INK],
+      ["Sand Dollar", "#decdbe", BAND_INK],
+      ["Chili Pepper", "#9b1b30", BAND_CREAM],
+      ["Blue Iris", "#5a5b9f", BAND_CREAM],
+      ["Mimosa", "#f0c05a", BAND_INK],
+      ["Turquoise", "#45b5aa", BAND_INK],
+      ["Honeysuckle", "#d94f70", BAND_INK],
+      ["Tangerine Tango", "#c73a20", BAND_CREAM], // 10% darker than #dd4124
+      ["Emerald", "#009874", BAND_INK],
+      ["Radiant Orchid", "#b163a3", BAND_INK],
+      ["Marsala", "#955251", BAND_CREAM],
+      ["Rose Quartz", "#f7cac9", BAND_INK],
+      ["Serenity", "#92a8d1", BAND_INK],
+      ["Greenery", "#88b04b", BAND_INK],
+      ["Ultra Violet", "#5f4b8b", BAND_CREAM],
+      ["Living Coral", "#ff6f61", BAND_INK],
+      ["Classic Blue", "#0f4c81", BAND_CREAM],
+      ["Illuminating", "#f5df4d", BAND_INK],
+      ["Ultimate Gray", "#939597", BAND_INK],
+      ["Very Peri", "#6667ab", BAND_CREAM],
+      ["Viva Magenta", "#bb2649", BAND_CREAM],
+      ["Peach Fuzz", "#ffbe98", BAND_INK],
+      ["Mocha Mousse", "#a47864", BAND_INK],
+    ];
+    const NO_REPEAT_WITHIN = 12;
+
+    function hashSeed(str) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    }
+
+    const MIN_HUE_GAP = 40;   // degrees between neighbouring bands
+
+    // Hue and saturation of a band, used only to stop two *different* Pantone
+    // reds landing next to each other — index de-duplication alone doesn't
+    // catch that, and a run of near-identical bands reads as a bug.
+    function hueSat(hex) {
+      const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+      if (d === 0) return { h: 0, s: 0 };
+      let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return { h: ((h * 60) + 360) % 360, s: d / mx };
+    }
+    const HUE_SAT = PANTONE.map(([, bg]) => hueSat(bg));
+    function hueGap(a, b) { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); }
+
+    // Colour is hashed from the entry id, so a post keeps it forever. Two guards
+    // then nudge the index forward: the same colour must not recur within
+    // NO_REPEAT_WITHIN posts, and a neighbour must not sit within MIN_HUE_GAP
+    // degrees. Near-greys are exempt from the hue rule — they clash with nothing.
+    function assignPostColours(orderedEntries) {
+      const map = new Map();
+      const recent = [];
+      let prev = null;
+      orderedEntries.forEach(entry => {
+        const start = hashSeed(String(entry.id)) % PANTONE.length;
+        let idx = start;
+        for (let step = 0; step < PANTONE.length; step++) {
+          const cand = (start + step) % PANTONE.length;
+          if (recent.includes(cand)) continue;
+          const hs = HUE_SAT[cand];
+          const clashes = prev && prev.s > 0.15 && hs.s > 0.15 && hueGap(hs.h, prev.h) < MIN_HUE_GAP;
+          if (clashes) continue;
+          idx = cand;
+          break;
+        }
+        const [name, bg, ink] = PANTONE[idx];
+        map.set(entry.id, { name, bg, ink });
+        prev = HUE_SAT[idx];
+        recent.push(idx);
+        if (recent.length > NO_REPEAT_WITHIN) recent.shift();
+      });
+      return map;
+    }
+
+    function relLum(hex) {
+      const v = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map(c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+      return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+    }
+    function contrast(a, b) {
+      const x = relLum(a), y = relLum(b);
+      return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+    }
+
     /* ─────────────────────────  Self-check  ─────────────────────────
        Runs only on ?selftest=1 — no cost on a normal load, but the date maths
        and the highlight splitter fail loudly if they regress. */
@@ -575,6 +690,31 @@
       ok("markdown is chronological within a day", md.indexOf("earlier") < md.indexOf("morning"));
       ok("markdown carries meta", md.indexOf("_Accra · #work_") !== -1);
 
+      // Every Pantone pair must clear AA for body text — this is the check that
+      // fails loudly if a colour is ever added or edited without re-verifying.
+      const bad = PANTONE.filter(([n, bg, ink]) => contrast(bg, ink) < 4.5);
+      ok("all " + PANTONE.length + " pantone pairs >= 4.5:1", bad.length === 0);
+      ok("pantone table is 28 colours", PANTONE.length === 28);
+
+      const mk = id => ({ id });
+      const many = Array.from({ length: 40 }, (_, i) => mk("entry-" + i));
+      const assigned = assignPostColours(many);
+      ok("every post gets a colour", assigned.size === 40);
+      const seq = many.map(e => assigned.get(e.id).bg);
+      let clash = false;
+      for (let i = 0; i < seq.length; i++)
+        for (let j = Math.max(0, i - NO_REPEAT_WITHIN); j < i; j++)
+          if (seq[i] === seq[j]) clash = true;
+      ok("no colour repeats within " + NO_REPEAT_WITHIN + " posts", !clash);
+      let tooClose = 0;
+      for (let i = 1; i < seq.length; i++) {
+        const a = hueSat(seq[i]), b = hueSat(seq[i - 1]);
+        if (a.s > 0.15 && b.s > 0.15 && hueGap(a.h, b.h) < MIN_HUE_GAP) tooClose++;
+      }
+      ok("no two neighbouring bands share a hue family", tooClose === 0);
+      ok("colour is stable for the same id",
+        assignPostColours([mk("abc")]).get("abc").bg === assignPostColours([mk("abc")]).get("abc").bg);
+
       if (fails.length) console.error("SELFTEST FAILED (" + fails.length + "):", fails);
       else console.log("SELFTEST PASSED");
       return fails;
@@ -595,7 +735,7 @@
           const dark = theme === "dark" || (theme === "auto" && mq.matches);
           document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
           const meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute("content", dark ? DARK_PAPER : LIGHT_PAPER);
+          if (meta) meta.setAttribute("content", dark ? DARK_GROUND : LIGHT_GROUND);
         };
         apply();
         mq.addEventListener("change", apply);
@@ -783,6 +923,10 @@
         return Array.from(set).sort();
       }, [entries]);
 
+      // Assigned over the displayed order so the no-repeat window matches what
+      // is actually on screen; the colour itself is still hashed from entry.id.
+      const postColours = useMemo(() => assignPostColours(filteredEntries), [filteredEntries]);
+
       const lookBack = useMemo(() => lookingBack(entries, now), [entries, now.toDateString()]);
       const lookBackCount = lookBack.reduce((n, g) => n + g.entries.length, 0);
 
@@ -958,8 +1102,8 @@
       }
 
       if (authLoading) return (
-        <div style={{ minHeight: "100vh", background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "var(--ink-faint)", letterSpacing: "0.08em" }}>Loading...</span>
+        <div style={{ minHeight: "100vh", background: "var(--ground)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontFamily: "var(--font-ui)", fontSize: 11, color: "var(--faint)", letterSpacing: "0.08em" }}>Loading...</span>
         </div>
       );
       if (!session) return <LoginScreen />;
@@ -1179,33 +1323,39 @@
                 sortedDates.map(dateKey => (
                   <div key={dateKey} className="day-group">
                     <div className="day-header">
-                      <span>{formatDate(new Date(dateKey))}</span>
-                      <span>{grouped[dateKey].length} {grouped[dateKey].length === 1 ? "entry" : "entries"}</span>
+                      <span className="day-title">{formatDate(new Date(dateKey))}</span>
+                      <span className="day-count">{grouped[dateKey].length} {grouped[dateKey].length === 1 ? "entry" : "entries"}</span>
                     </div>
-                    {grouped[dateKey].map(entry => (
-                      <div key={entry.id} className={`entry ${justAdded === entry.id ? "new" : ""}`}>
-                        <div className="entry-time">{formatTime(new Date(entry.timestamp))}</div>
-                        <div>
-                          <div className="entry-text">{renderText(entry.text)}</div>
-                          <div className="entry-meta">
-                            {entry.location && <span className="entry-location">{entry.location}</span>}
-                            {(entry.tags || []).map(tag => (
-                              <button key={tag} className="entry-tag" onClick={() => filterByTag(tag)}>#{tag}</button>
-                            ))}
-                            <div className="entry-actions">
-                              <button className="icon-btn edit-btn" onClick={() => startEdit(entry)} title="Edit">✎</button>
-                              <button
-                                className={`icon-btn delete-btn ${confirmDelete === entry.id ? "confirming" : ""}`}
-                                onClick={() => requestDelete(entry.id)}
-                                title={confirmDelete === entry.id ? "Tap again to delete" : "Delete"}
-                              >
-                                {confirmDelete === entry.id ? "sure?" : "×"}
-                              </button>
-                            </div>
+                    {grouped[dateKey].map(entry => {
+                      const colour = postColours.get(entry.id) || { bg: "var(--quiet)", ink: "var(--ink)" };
+                      return (
+                      <div
+                        key={entry.id}
+                        className={`post ${justAdded === entry.id ? "new" : ""}`}
+                        style={{ "--band": colour.bg, "--band-ink": colour.ink }}
+                        title={colour.name}
+                      >
+                        <div className="post-time">{formatTime(new Date(entry.timestamp))}</div>
+                        <div className="post-text">{renderText(entry.text)}</div>
+                        <div className="post-meta">
+                          {entry.location && <span className="post-loc">{entry.location}</span>}
+                          {(entry.tags || []).map(tag => (
+                            <button key={tag} className="post-tag" onClick={() => filterByTag(tag)}>#{tag}</button>
+                          ))}
+                          <div className="post-actions">
+                            <button className="icon-btn edit-btn" onClick={() => startEdit(entry)} title="Edit">✎</button>
+                            <button
+                              className={`icon-btn delete-btn ${confirmDelete === entry.id ? "confirming" : ""}`}
+                              onClick={() => requestDelete(entry.id)}
+                              title={confirmDelete === entry.id ? "Tap again to delete" : "Delete"}
+                            >
+                              {confirmDelete === entry.id ? "sure?" : "×"}
+                            </button>
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ))
               )}
