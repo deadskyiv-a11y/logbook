@@ -1,3 +1,14 @@
 # macOS
 .DS_Store
 **/.DS_Store
+
+# Database dumps. This repo is public and logbook_data.sql contains the
+# entries themselves — never commit it. Schema belongs in supabase/migrations.
+*.sql
+!supabase/migrations/*.sql
+
+# Supabase CLI local state (link info, version pins)
+supabase/.temp/
+
+# Unused brand asset kept locally
+roaming-ambassdor-co.-logo-mark-black-rgb-900px-w-72ppi.png
