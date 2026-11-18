@@ -825,16 +825,29 @@
 
     /* ─────────────────────────  Location  ───────────────────────── */
 
-    // Two sources, asked in parallel:
-    //  - Nominatim gives the street and neighbourhood under the pin.
-    //  - Overpass lists named places (hotels, shops, churches, offices...)
-    //    within NEARBY_RADIUS metres. Nominatim alone only reports the single
-    //    nearest object, which is often an unnamed building or a road, so a
-    //    venue next to you rarely made it into the label.
-    // The label is the most specific thing found: a venue close to the pin,
-    // else the street, then the neighbourhood.
+    // Three sources:
+    //  - Your own past entries. A label you saved within a few dozen metres
+    //    wins outright, and the area you've used nearby is reused. Correct a
+    //    spot once and it stays correct.
+    //  - Nominatim: street and a best-guess neighbourhood under the pin. Its
+    //    neighbourhood is often wrong where OSM areas are sparse.
+    //  - Overpass: named places around the pin, plus the named areas that
+    //    actually contain it (is_in), which beats Nominatim's guess.
+    // Nominatim answers first and sets a label; Overpass refines it if you
+    // haven't typed in the field since.
     const POI_CATEGORIES = ["amenity", "tourism", "leisure", "shop", "office", "building", "historic", "craft"];
-    const NEARBY_RADIUS = 80;
+    const VENUE_RADIUS = 120;
+    const AREA_RADIUS = 2000;
+    const OVERPASS_SERVERS = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    ];
+    // Smaller areas first. A residential estate beats the suburb around it.
+    const AREA_RANK = { neighbourhood: 0, residential: 1, quarter: 2, suburb: 3, hamlet: 4, village: 5 };
+    // Named things that are not places you'd be "at".
+    const NOT_VENUE = ["highway", "boundary", "route", "railway", "waterway", "place", "landuse", "natural", "power", "barrier", "admin_level"];
+    const EMPTY_PARTS = { area: "", city: "", street: "", poi: "" };
 
     function addressParts(data) {
       const a = (data && data.address) || {};
@@ -859,14 +872,6 @@
       return accuracy == null ? 30 : Math.min(60, Math.max(25, accuracy));
     }
 
-    function pickLabel(parts, nearby, accuracy) {
-      const r = venueRadius(accuracy);
-      const close = nearby.find(p => p.dist <= r);
-      const poi = parts.poi && (accuracy == null || accuracy <= 60) ? parts.poi : "";
-      const spot = (close && close.name) || poi || parts.street;
-      return joinLabel(spot, parts.area, parts.city);
-    }
-
     function metresBetween(lat1, lng1, lat2, lng2) {
       const R = 6371000, rad = Math.PI / 180;
       const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
@@ -874,19 +879,79 @@
       return 2 * R * Math.asin(Math.sqrt(h));
     }
 
-    // Overpass elements -> [{ name, dist }], nearest first, one per name.
-    function rankNearby(elements, lat, lng) {
+    function uniqueByName(list) {
       const seen = new Set();
-      return (elements || [])
-        .map(e => {
-          const at = e.center || e;
-          if (!e.tags || !e.tags.name || at.lat == null) return null;
-          return { name: e.tags.name, dist: Math.round(metresBetween(lat, lng, at.lat, at.lon)) };
-        })
-        .filter(Boolean)
-        .sort((x, y) => x.dist - y.dist)
-        .filter(p => (seen.has(p.name) ? false : (seen.add(p.name), true)))
-        .slice(0, 6);
+      return list.filter(p => (seen.has(p.name) ? false : (seen.add(p.name), true)));
+    }
+
+    // Overpass elements -> { venues, areas }. Venues nearest first; areas
+    // are those containing the pin (inside: true, smallest first), then
+    // nearby area names by distance.
+    function parseOverpass(elements, lat, lng) {
+      const venues = [], inside = [], around = [];
+      (elements || []).forEach(e => {
+        const t = e.tags || {};
+        if (!t.name) return;
+        if (e.type === "area") {
+          const kind = t.place || (t.landuse === "residential" ? "residential" : "");
+          if (kind in AREA_RANK) inside.push({ name: t.name, rank: AREA_RANK[kind], inside: true });
+          return;
+        }
+        const at = e.center || e;
+        if (at.lat == null) return;
+        const dist = Math.round(metresBetween(lat, lng, at.lat, at.lon));
+        if (t.place) {
+          if (t.place in AREA_RANK && dist <= AREA_RADIUS) around.push({ name: t.name, dist });
+          return;
+        }
+        if (NOT_VENUE.some(k => k in t)) return;
+        if (dist <= VENUE_RADIUS) venues.push({ name: t.name, dist });
+      });
+      return {
+        venues: uniqueByName(venues.sort((a, b) => a.dist - b.dist)).slice(0, 8),
+        areas: uniqueByName([
+          ...inside.sort((a, b) => a.rank - b.rank),
+          ...around.sort((a, b) => a.dist - b.dist),
+        ]).slice(0, 5),
+      };
+    }
+
+    // Labels you've saved before, near this pin.
+    function rememberedNearby(entries, lat, lng, radius = 80) {
+      return uniqueByName(entries
+        .filter(e => e.lat != null && e.lng != null && e.location)
+        .map(e => ({ name: e.location, dist: Math.round(metresBetween(lat, lng, e.lat, e.lng)) }))
+        .filter(p => p.dist <= radius)
+        .sort((a, b) => a.dist - b.dist)).slice(0, 4);
+    }
+
+    // The area you've written most often within 500 m: the last part of
+    // "Place, Area" labels.
+    function rememberedArea(entries, lat, lng) {
+      const counts = new Map();
+      entries.forEach(e => {
+        if (e.lat == null || e.lng == null || !e.location) return;
+        const bits = e.location.split(",").map(x => x.trim()).filter(Boolean);
+        if (bits.length < 2) return;
+        if (metresBetween(lat, lng, e.lat, e.lng) > 500) return;
+        const area = bits[bits.length - 1];
+        counts.set(area, (counts.get(area) || 0) + 1);
+      });
+      let best = "", n = 0;
+      counts.forEach((c, a) => { if (c > n) { best = a; n = c; } });
+      return best;
+    }
+
+    function chooseLabel({ parts, venues, areas, remembered, myArea, accuracy }) {
+      const r = venueRadius(accuracy);
+      const mine = remembered.find(p => p.dist <= r);
+      if (mine) return { spot: "", area: "", label: mine.name };
+      const close = venues.find(p => p.dist <= r);
+      const poi = parts.poi && (accuracy == null || accuracy <= 60) ? parts.poi : "";
+      const spot = (close && close.name) || poi || parts.street;
+      const container = areas.find(a => a.inside);
+      const area = myArea || (container && container.name) || parts.area || parts.city;
+      return { spot, area, label: joinLabel(spot, area, parts.city) };
     }
 
     async function reverseGeocode(lat, lng) {
@@ -897,21 +962,34 @@
       return addressParts(await res.json());
     }
 
+    // Public Overpass servers are often busy. Ask the main one first, then a
+    // mirror every 4 s until one answers; the rest are cancelled.
     async function nearbyPlaces(lat, lng) {
-      const around = "(around:" + NEARBY_RADIUS + "," + lat + "," + lng + ")";
-      const q = "[out:json][timeout:8];(" +
-        POI_CATEGORIES.concat(["place"]).map(k => 'nwr' + around + '["name"]["' + k + '"];').join("") +
-        ");out center tags 40;";
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 9000);
+      const q = "[out:json][timeout:12];is_in(" + lat + "," + lng + ")->.a;(" +
+        "nwr(around:" + VENUE_RADIUS + "," + lat + "," + lng + ")[\"name\"];" +
+        "nwr(around:" + AREA_RADIUS + "," + lat + "," + lng + ")[\"place\"~\"^(neighbourhood|quarter|suburb|hamlet|village)$\"][\"name\"];" +
+        "area.a[\"place\"][\"name\"];area.a[\"landuse\"=\"residential\"][\"name\"];" +
+        ");out center tags;";
+      const ctrls = OVERPASS_SERVERS.map(() => new AbortController());
+      let settled = false;
+      const attempt = (url, i) => new Promise((resolve, reject) => {
+        const go = async () => {
+          if (settled) return reject(new Error("skipped"));
+          const t = setTimeout(() => ctrls[i].abort(), 15000);
+          try {
+            const res = await fetch(url + "?data=" + encodeURIComponent(q), { signal: ctrls[i].signal });
+            if (!res.ok) throw new Error("overpass " + res.status);
+            resolve(parseOverpass((await res.json()).elements, lat, lng));
+          } catch (err) { reject(err); } finally { clearTimeout(t); }
+        };
+        setTimeout(go, i * 4000);
+      });
       try {
-        const res = await fetch("https://overpass-api.de/api/interpreter", {
-          method: "POST", body: "data=" + encodeURIComponent(q), signal: ctrl.signal,
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        });
-        if (!res.ok) throw new Error("overpass " + res.status);
-        return rankNearby((await res.json()).elements, lat, lng);
-      } finally { clearTimeout(t); }
+        return await Promise.any(OVERPASS_SERVERS.map(attempt));
+      } finally {
+        settled = true;
+        ctrls.forEach(c => c.abort());
+      }
     }
 
     function coordLabel(lat, lng) { return lat.toFixed(5) + ", " + lng.toFixed(5); }
@@ -1005,21 +1083,40 @@
         assignPostColours([mk("x", 0, "Emerald")]).get("x").name === "Emerald");
       const parts = addressParts({ name: "", category: "highway",
         address: { road: "Liberation Road", house_number: "12", suburb: "Osu", city: "Accra" } });
-      ok("label falls back to the street", pickLabel(parts, [], 15) === "12 Liberation Road, Osu");
-      ok("label uses a venue beside the pin",
-        pickLabel(parts, [{ name: "Raybow", dist: 18 }], null) === "Raybow, Osu");
-      ok("label ignores a venue too far for the fix",
-        pickLabel(parts, [{ name: "Raybow", dist: 70 }], 15) === "12 Liberation Road, Osu");
+      const L = o => chooseLabel({ parts, venues: [], areas: [], remembered: [], myArea: "", accuracy: 15, ...o }).label;
+      ok("label falls back to the street", L({}) === "12 Liberation Road, Osu");
+      ok("label uses a venue beside the pin", L({ venues: [{ name: "Raybow", dist: 18 }], accuracy: null }) === "Raybow, Osu");
+      ok("label ignores a venue too far for the fix", L({ venues: [{ name: "Raybow", dist: 70 }] }) === "12 Liberation Road, Osu");
+      ok("containing area beats the geocoder's guess",
+        L({ areas: [{ name: "Beachwood", inside: true }, { name: "Chapel Hill", dist: 300 }] }) === "12 Liberation Road, Beachwood");
+      ok("a nearby (not containing) area does not override", L({ areas: [{ name: "Chapel Hill", dist: 300 }] }) === "12 Liberation Road, Osu");
+      ok("your own area beats everything", L({ myArea: "Beachwood", areas: [{ name: "X", inside: true }] }) === "12 Liberation Road, Beachwood");
+      ok("your saved label for this spot wins", L({ remembered: [{ name: "Home, Beachwood", dist: 10 }], venues: [{ name: "Raybow", dist: 5 }] }) === "Home, Beachwood");
       ok("label drops a geocoder venue on a loose fix",
-        pickLabel(addressParts({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }), [], 500) === "Anaji, Takoradi");
-      const ranked = rankNearby([
-        { type: "node", lat: 5.5561, lon: -0.1820, tags: { name: "Far" } },
-        { type: "way", center: { lat: 5.55601, lon: -0.18201 }, tags: { name: "Near" } },
+        chooseLabel({ parts: addressParts({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }),
+          venues: [], areas: [], remembered: [], myArea: "", accuracy: 500 }).label === "Anaji, Takoradi");
+      const op = parseOverpass([
+        { type: "node", lat: 5.5561, lon: -0.1820, tags: { name: "Far", amenity: "cafe" } },
+        { type: "way", center: { lat: 5.55601, lon: -0.18201 }, tags: { name: "Near", building: "apartments" } },
         { type: "node", lat: 5.55602, lon: -0.18202, tags: { name: "Near" } },
         { type: "node", lat: 5.5560, lon: -0.1820, tags: {} },
+        { type: "way", center: { lat: 5.5560, lon: -0.1820 }, tags: { name: "Ring Road", highway: "primary" } },
+        { type: "node", lat: 5.5590, lon: -0.1820, tags: { name: "Chapel Hill", place: "suburb" } },
+        { type: "area", tags: { name: "Beachwood", landuse: "residential" } },
+        { type: "area", tags: { name: "Takoradi", place: "city" } },
       ], 5.5560, -0.1820);
-      ok("nearby is nearest first, deduped, unnamed dropped",
-        ranked.map(p => p.name).join() === "Near,Far" && ranked[0].dist <= 2 && ranked[1].dist === 11);
+      ok("venues nearest first, deduped, roads and unnamed dropped",
+        op.venues.map(p => p.name).join() === "Near,Far" && op.venues[0].dist <= 2 && op.venues[1].dist === 11);
+      ok("areas: containing first, then nearby; cities skipped",
+        op.areas.map(a => a.name).join() === "Beachwood,Chapel Hill" && op.areas[0].inside === true);
+      const past = [
+        { location: "Home, Beachwood", lat: 5.5561, lng: -0.1820 },
+        { location: "Shop, Beachwood", lat: 5.5580, lng: -0.1820 },
+        { location: "Office, Osu", lat: 5.6000, lng: -0.1820 },
+        { location: "No coords", lat: null, lng: null },
+      ];
+      ok("remembered labels within 80 m", rememberedNearby(past, 5.5560, -0.1820).map(p => p.name).join() === "Home, Beachwood");
+      ok("remembered area from labels within 500 m", rememberedArea(past, 5.5560, -0.1820) === "Beachwood");
       // August 2026 starts on a Saturday, so Monday-first needs five blanks.
       const aug = monthGrid(2026, 7);
       ok("monthGrid pads to whole weeks", aug.length % 7 === 0);
@@ -1263,7 +1360,12 @@
       const hasExtraColumns = useRef(true);
       // Named places near the pin, offered as one-tap labels, plus the area
       // name to pair them with.
-      const [nearby, setNearby] = useState({ list: [], area: "" });
+      const NO_NEARBY = { status: "idle", venues: [], areas: [], remembered: [], spot: "", area: "" };
+      const [nearby, setNearby] = useState(NO_NEARBY);
+      // Set once you type in the location field or tap a suggestion, so a
+      // slow Overpass answer never overwrites your choice.
+      const userPicked = useRef(false);
+      const lastFix = useRef(null);
       const colourFreezeRan = useRef(false);
       const [now, setNow] = useState(new Date());
       const [justAdded, setJustAdded] = useState(null);
@@ -1441,13 +1543,34 @@
 
       async function labelFor(lat, lng, acc) {
         const seq = ++geoSeq.current;
-        setNearby({ list: [], area: "" });
-        const [geo, places] = await Promise.allSettled([reverseGeocode(lat, lng), nearbyPlaces(lat, lng)]);
-        if (seq !== geoSeq.current) return;
-        const parts = geo.status === "fulfilled" ? geo.value : { area: "", city: "", street: "", poi: "" };
-        const list = places.status === "fulfilled" ? places.value : [];
-        setNearby({ list, area: parts.area || parts.city });
-        setLocation(pickLabel(parts, list, acc) || coordLabel(lat, lng));
+        lastFix.current = { lat, lng, acc };
+        userPicked.current = false;
+        const remembered = rememberedNearby(entries, lat, lng);
+        const myArea = rememberedArea(entries, lat, lng);
+        let parts = EMPTY_PARTS, places = { venues: [], areas: [] }, status = "loading";
+        const apply = () => {
+          if (seq !== geoSeq.current) return;
+          const pick = chooseLabel({ parts, ...places, remembered, myArea, accuracy: acc });
+          setNearby({ status, ...places, remembered, spot: pick.spot, area: pick.area });
+          if (!userPicked.current) setLocation(pick.label || coordLabel(lat, lng));
+        };
+        apply();
+        const geo = reverseGeocode(lat, lng).then(p => { parts = p; }, () => {}).then(apply);
+        const ovp = nearbyPlaces(lat, lng).then(p => { places = p; status = "ready"; }, () => { status = "error"; });
+        await geo;
+        await ovp;
+        apply();
+      }
+
+      function retryNearby() {
+        const f = lastFix.current;
+        if (f) labelFor(f.lat, f.lng, f.acc);
+      }
+
+      function pickSuggestion(label, patch) {
+        userPicked.current = true;
+        if (patch) setNearby(n => ({ ...n, ...patch }));
+        setLocation(label);
       }
 
       // One getCurrentPosition call often returns the phone's first, coarse
@@ -1494,7 +1617,7 @@
         geoSeq.current++;
         setLocLoading(false);
         setCoords(null);
-        setNearby({ list: [], area: "" });
+        setNearby(NO_NEARBY);
       }
 
       function startCompose() {
@@ -1775,7 +1898,7 @@
                 <input
                   className="field location-input"
                   value={location}
-                  onChange={e => setLocation(e.target.value)}
+                  onChange={e => { userPicked.current = true; setLocation(e.target.value); }}
                   placeholder="Location (optional)"
                 />
                 <button className="loc-btn" onClick={getLocation} disabled={locLoading}>
@@ -1792,20 +1915,57 @@
                     </span>
                     <button className="text-btn" onClick={clearPin}>remove pin</button>
                   </div>
-                  {nearby.list.length > 0 && (
+                  {nearby.remembered.length > 0 && (
                     <div className="nearby">
-                      <span className="micro-label">Nearby</span>
+                      <span className="micro-label">You've been here</span>
                       <div className="nearby-chips">
-                        {nearby.list.map(p => {
+                        {nearby.remembered.map(p => (
+                          <button key={p.name} className={`chip ${location === p.name ? "on" : ""}`}
+                            onClick={() => pickSuggestion(p.name)}>
+                            {p.name} <span className="nearby-dist">{p.dist} m</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {nearby.venues.length > 0 && (
+                    <div className="nearby">
+                      <span className="micro-label">Nearby places</span>
+                      <div className="nearby-chips">
+                        {nearby.venues.map(p => {
                           const label = joinLabel(p.name, nearby.area);
                           return (
                             <button key={p.name} className={`chip ${location === label ? "on" : ""}`}
-                              onClick={() => setLocation(label)}>
+                              onClick={() => pickSuggestion(label, { spot: p.name })}>
                               {p.name} <span className="nearby-dist">{p.dist} m</span>
                             </button>
                           );
                         })}
                       </div>
+                    </div>
+                  )}
+                  {nearby.areas.length > 0 && (
+                    <div className="nearby">
+                      <span className="micro-label">Area</span>
+                      <div className="nearby-chips">
+                        {nearby.areas.map(a => {
+                          const label = joinLabel(nearby.spot, a.name);
+                          return (
+                            <button key={a.name} className={`chip ${nearby.area === a.name && location === label ? "on" : ""}`}
+                              onClick={() => pickSuggestion(label, { area: a.name })}>
+                              {a.name}
+                              <span className="nearby-dist">{a.inside ? "you're in it" : `${(a.dist / 1000).toFixed(1)} km`}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {nearby.status === "loading" && <div className="loc-meta"><span>Finding nearby places...</span></div>}
+                  {nearby.status === "error" && (
+                    <div className="loc-meta">
+                      <span>Nearby places unavailable</span>
+                      <button className="text-btn" onClick={retryNearby}>retry</button>
                     </div>
                   )}
                 </>
