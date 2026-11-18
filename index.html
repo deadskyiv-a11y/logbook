@@ -838,11 +838,6 @@
     const POI_CATEGORIES = ["amenity", "tourism", "leisure", "shop", "office", "building", "historic", "craft"];
     const VENUE_RADIUS = 120;
     const AREA_RADIUS = 2000;
-    const OVERPASS_SERVERS = [
-      "https://overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter",
-      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-    ];
     // Smaller areas first. A residential estate beats the suburb around it.
     const AREA_RANK = { neighbourhood: 0, residential: 1, quarter: 2, suburb: 3, hamlet: 4, village: 5 };
     // Named things that are not places you'd be "at".
@@ -962,34 +957,22 @@
       return addressParts(await res.json());
     }
 
-    // Public Overpass servers are often busy. Ask the main one first, then a
-    // mirror every 4 s until one answers; the rest are cancelled.
+    // Nearby places come from /api/places, a function on this same Vercel
+    // site that asks Overpass on our behalf. Calling the public servers
+    // straight from the phone failed on every server with no way to see why;
+    // the function retries mirrors, caches, and logs failures.
     async function nearbyPlaces(lat, lng) {
-      const q = "[out:json][timeout:12];is_in(" + lat + "," + lng + ")->.a;(" +
-        "nwr(around:" + VENUE_RADIUS + "," + lat + "," + lng + ")[\"name\"];" +
-        "nwr(around:" + AREA_RADIUS + "," + lat + "," + lng + ")[\"place\"~\"^(neighbourhood|quarter|suburb|hamlet|village)$\"][\"name\"];" +
-        "area.a[\"place\"][\"name\"];area.a[\"landuse\"=\"residential\"][\"name\"];" +
-        ");out center tags;";
-      const ctrls = OVERPASS_SERVERS.map(() => new AbortController());
-      let settled = false;
-      const attempt = (url, i) => new Promise((resolve, reject) => {
-        const go = async () => {
-          if (settled) return reject(new Error("skipped"));
-          const t = setTimeout(() => ctrls[i].abort(), 15000);
-          try {
-            const res = await fetch(url + "?data=" + encodeURIComponent(q), { signal: ctrls[i].signal });
-            if (!res.ok) throw new Error("overpass " + res.status);
-            resolve(parseOverpass((await res.json()).elements, lat, lng));
-          } catch (err) { reject(err); } finally { clearTimeout(t); }
-        };
-        setTimeout(go, i * 4000);
-      });
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 32000);
       try {
-        return await Promise.any(OVERPASS_SERVERS.map(attempt));
-      } finally {
-        settled = true;
-        ctrls.forEach(c => c.abort());
-      }
+        const res = await fetch("/api/places?lat=" + lat.toFixed(5) + "&lng=" + lng.toFixed(5), { signal: ctrl.signal });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !Array.isArray(body.elements)) {
+          const why = body.attempts ? body.attempts.map(a => a.server + ": " + a.error).join("; ") : "HTTP " + res.status;
+          throw new Error(why);
+        }
+        return parseOverpass(body.elements, lat, lng);
+      } finally { clearTimeout(t); }
     }
 
     function coordLabel(lat, lng) { return lat.toFixed(5) + ", " + lng.toFixed(5); }
