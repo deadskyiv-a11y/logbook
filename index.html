@@ -21,6 +21,8 @@
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.4/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // Resolve and apply the theme before first paint, so a dark load never flashes light.
     try {
@@ -285,6 +287,23 @@
       letter-spacing: 0.04em; padding: 0; white-space: nowrap;
       text-decoration: underline; text-underline-offset: 3px;
     }
+    /* Map sits in its own stacking context so Leaflet's high pane z-indexes
+       never climb over the sticky header or the tag suggestions. */
+    .loc-map {
+      position: relative; z-index: 0; isolation: isolate;
+      height: 200px; margin-top: var(--s3);
+      border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+    }
+    .loc-meta {
+      display: flex; justify-content: space-between; gap: var(--s3);
+      font-family: var(--font-ui); font-size: var(--t-micro); letter-spacing: 0.04em;
+      margin-top: var(--s2); opacity: 0.8;
+    }
+    .loc-pin {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #0e0e10; border: 3px solid #ffffff; box-shadow: 0 0 0 1px #0e0e10;
+    }
+    .post-loc a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
     .tag-block { margin-top: var(--s5); margin-bottom: var(--s7); position: relative; }
     .tag-input { font-size: var(--t-meta); padding: var(--s1) 0 5px; margin-top: var(--s2); }
     .tag-suggest {
@@ -752,25 +771,41 @@
     const HUE_SAT = PANTONE.map(([, bg]) => hueSat(bg));
     function hueGap(a, b) { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); }
 
-    // Colour is hashed from the entry id, so a post keeps it forever. Two guards
-    // then nudge the index forward: the same colour must not recur within
-    // NO_REPEAT_WITHIN posts, and a neighbour must not sit within MIN_HUE_GAP
-    // degrees. Near-greys are exempt from the hue rule — they clash with nothing.
-    function assignPostColours(orderedEntries) {
+    const PANTONE_INDEX = new Map(PANTONE.map(([name], i) => [name, i]));
+
+    // Oldest first. Walking the list newest-first (the old behaviour) meant a
+    // new post at the head changed the neighbours of every post below it, so
+    // the whole feed reshuffled on each save.
+    function chronological(list) {
+      return list.slice().sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+    }
+
+    // A post's colour is saved on the row (entries.colour) when it is created,
+    // and a saved colour always wins. For rows without one, the colour is hashed
+    // from the id and nudged forward by two guards: no repeat within
+    // NO_REPEAT_WITHIN posts, and no neighbour within MIN_HUE_GAP degrees.
+    // Near-greys are exempt from the hue rule. Because the walk is oldest-first,
+    // adding a post never changes the colour of an earlier one.
+    function assignPostColours(entries) {
       const map = new Map();
       const recent = [];
       let prev = null;
-      orderedEntries.forEach(entry => {
-        const start = hashSeed(String(entry.id)) % PANTONE.length;
-        let idx = start;
-        for (let step = 0; step < PANTONE.length; step++) {
-          const cand = (start + step) % PANTONE.length;
-          if (recent.includes(cand)) continue;
-          const hs = HUE_SAT[cand];
-          const clashes = prev && prev.s > 0.15 && hs.s > 0.15 && hueGap(hs.h, prev.h) < MIN_HUE_GAP;
-          if (clashes) continue;
-          idx = cand;
-          break;
+      chronological(entries).forEach(entry => {
+        let idx;
+        if (entry.colour && PANTONE_INDEX.has(entry.colour)) {
+          idx = PANTONE_INDEX.get(entry.colour);
+        } else {
+          const start = hashSeed(String(entry.id)) % PANTONE.length;
+          idx = start;
+          for (let step = 0; step < PANTONE.length; step++) {
+            const cand = (start + step) % PANTONE.length;
+            if (recent.includes(cand)) continue;
+            const hs = HUE_SAT[cand];
+            const clashes = prev && prev.s > 0.15 && hs.s > 0.15 && hueGap(hs.h, prev.h) < MIN_HUE_GAP;
+            if (clashes) continue;
+            idx = cand;
+            break;
+          }
         }
         const [name, bg, ink] = PANTONE[idx];
         map.set(entry.id, { name, bg, ink });
@@ -780,6 +815,37 @@
       });
       return map;
     }
+
+    // Sorts after every real entry, so the draft is assigned as the newest post.
+    const DRAFT_TIMESTAMP = "9999-12-31T23:59:59Z";
+
+    /* ─────────────────────────  Location  ───────────────────────── */
+
+    // Nominatim at zoom 18 returns the nearest building or place. A named
+    // venue (hotel, church, shop) is the most useful label when the fix is
+    // tight; otherwise fall back to neighbourhood, then town.
+    const POI_CATEGORIES = ["amenity", "tourism", "leisure", "shop", "office", "building", "historic", "craft"];
+    function placeLabel(data, accuracy) {
+      const a = (data && data.address) || {};
+      const area = a.neighbourhood || a.suburb || a.quarter || a.residential || a.hamlet ||
+        a.village || a.city_district || a.town || a.city || "";
+      const city = a.city || a.town || a.municipality || a.county || a.state || "";
+      const poi = data && data.name && POI_CATEGORIES.includes(data.category) &&
+        (accuracy == null || accuracy <= 60) ? data.name : "";
+      const parts = [];
+      [poi, area, city].forEach(x => { if (x && !parts.includes(x)) parts.push(x); });
+      return parts.slice(0, 2).join(", ");
+    }
+
+    async function reverseGeocode(lat, lng, accuracy) {
+      const url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1" +
+        "&accept-language=en&lat=" + lat + "&lon=" + lng;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("geocode " + res.status);
+      return placeLabel(await res.json(), accuracy);
+    }
+
+    function coordLabel(lat, lng) { return lat.toFixed(5) + ", " + lng.toFixed(5); }
 
     function relLum(hex) {
       const v = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
@@ -836,8 +902,8 @@
       ok("all " + PANTONE.length + " pantone pairs >= 4.5:1", bad.length === 0);
       ok("pantone table is 28 colours", PANTONE.length === 28);
 
-      const mk = id => ({ id });
-      const many = Array.from({ length: 40 }, (_, i) => mk("entry-" + i));
+      const mk = (id, t = 0, colour) => ({ id, timestamp: new Date(2026, 0, 1, 0, t).toISOString(), colour });
+      const many = Array.from({ length: 40 }, (_, i) => mk("entry-" + i, i));
       const assigned = assignPostColours(many);
       ok("every post gets a colour", assigned.size === 40);
       const seq = many.map(e => assigned.get(e.id).bg);
@@ -854,13 +920,24 @@
       ok("no two neighbouring bands share a hue family", tooClose === 0);
       // The point of minting the id before insert: the colour shown while
       // composing must be the colour the saved post keeps.
-      const existing = Array.from({ length: 9 }, (_, i) => mk("old-" + i));
-      const draft = mk("draft-1");
-      const previewed = assignPostColours([draft, ...existing]).get(draft.id).bg;
-      const afterSave = assignPostColours([draft, ...existing]).get(draft.id).bg;
+      const existing = Array.from({ length: 9 }, (_, i) => mk("old-" + i, i));
+      const draft = { id: "draft-1", timestamp: DRAFT_TIMESTAMP };
+      const previewed = assignPostColours([...existing, draft]).get(draft.id).bg;
+      const afterSave = assignPostColours([mk("draft-1", 99), ...existing]).get(draft.id).bg;
       ok("compose preview survives saving", previewed === afterSave);
       ok("draft colour respects its neighbour",
-        previewed !== assignPostColours([draft, ...existing]).get(existing[0].id).bg);
+        previewed !== assignPostColours(existing).get(existing[8].id).bg);
+      // The bug this fixes: adding a post must not recolour any earlier post.
+      const before = assignPostColours(existing);
+      const after = assignPostColours([mk("new-1", 50), ...existing]);
+      ok("a new post leaves earlier colours alone",
+        existing.every(e => before.get(e.id).bg === after.get(e.id).bg));
+      ok("a stored colour always wins",
+        assignPostColours([mk("x", 0, "Emerald")]).get("x").name === "Emerald");
+      ok("placeLabel prefers a venue on a tight fix",
+        placeLabel({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }, 20) === "Raybow, Anaji");
+      ok("placeLabel drops the venue on a loose fix",
+        placeLabel({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }, 500) === "Anaji, Takoradi");
       // August 2026 starts on a Saturday, so Monday-first needs five blanks.
       const aug = monthGrid(2026, 7);
       ok("monthGrid pads to whole weeks", aug.length % 7 === 0);
@@ -1046,6 +1123,46 @@
       );
     }
 
+    // Draggable pin on an OpenStreetMap base. Tap or drag to correct a fix;
+    // the accuracy ring shows how far the phone itself thinks it could be off.
+    function LocationMap({ coords, onMove }) {
+      const el = useRef(null);
+      const parts = useRef({});
+      const onMoveRef = useRef(onMove);
+      onMoveRef.current = onMove;
+
+      useEffect(() => {
+        if (!window.L || !el.current) return;
+        const L = window.L;
+        const map = L.map(el.current, { zoomControl: false }).setView([coords.lat, coords.lng], 17);
+        map.attributionControl.setPrefix(false);
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19, attribution: "&copy; OpenStreetMap",
+        }).addTo(map);
+        const ring = L.circle([coords.lat, coords.lng], {
+          radius: coords.acc || 0, stroke: false, fillColor: "#0e0e10", fillOpacity: 0.12,
+        }).addTo(map);
+        const icon = L.divIcon({ className: "", html: '<div class="loc-pin"></div>', iconSize: [16, 16], iconAnchor: [8, 8] });
+        const pin = L.marker([coords.lat, coords.lng], { draggable: true, icon }).addTo(map);
+        pin.on("dragend", () => { const p = pin.getLatLng(); onMoveRef.current(p.lat, p.lng); });
+        map.on("click", e => { pin.setLatLng(e.latlng); onMoveRef.current(e.latlng.lat, e.latlng.lng); });
+        parts.current = { map, pin, ring };
+        return () => map.remove();
+      }, []);
+
+      useEffect(() => {
+        const { map, pin, ring } = parts.current;
+        if (!map) return;
+        const ll = [coords.lat, coords.lng];
+        pin.setLatLng(ll);
+        ring.setLatLng(ll).setRadius(coords.acc || 0);
+        if (!map.getBounds().pad(-0.2).contains(ll)) map.panTo(ll);
+      }, [coords.lat, coords.lng, coords.acc]);
+
+      if (!window.L) return null;
+      return <div className="loc-map" ref={el} />;
+    }
+
     function App() {
       const [session, setSession] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
@@ -1056,6 +1173,13 @@
       const [location, setLocation] = useState("");
       const [tags, setTags] = useState([]);
       const [locLoading, setLocLoading] = useState(false);
+      // { lat, lng, acc } — acc is null once the pin has been placed by hand.
+      const [coords, setCoords] = useState(null);
+      const geoWatch = useRef(null);
+      const geoSeq = useRef(0);
+      // Flips to false if the database hasn't had the colour/coords migration.
+      const hasExtraColumns = useRef(true);
+      const colourFreezeRan = useRef(false);
       const [now, setNow] = useState(new Date());
       const [justAdded, setJustAdded] = useState(null);
       const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1104,11 +1228,11 @@
       // since the draft sits at the head of this same list.
       const postColours = useMemo(() => assignPostColours(entries), [entries]);
 
-      // Prepending the draft reproduces exactly what it will be assigned once
-      // saved — same list, same neighbours, same guards.
+      // The draft is assigned as the newest post, which is exactly where it
+      // lands once saved. Its colour is then written to the row.
       const draftColour = useMemo(() => {
         if (!draftId) return null;
-        return assignPostColours([{ id: draftId }, ...entries]).get(draftId);
+        return assignPostColours([...entries, { id: draftId, timestamp: DRAFT_TIMESTAMP }]).get(draftId);
       }, [draftId, entries]);
 
       const composeColour = editingEntry ? postColours.get(editingEntry.id) : draftColour;
@@ -1195,6 +1319,7 @@
           const { data, error } = await db.from("entries").select("*").order("timestamp", { ascending: false });
           if (!error) setEntries(data || []);
           setLoading(false);
+          if (!error && data && data.length) freezeColours(data);
         }
         fetchEntries();
       }, [session]);
@@ -1209,37 +1334,86 @@
 
       useEffect(() => () => clearTimeout(confirmTimer.current), []);
 
+      // Rows saved before colours were stored get their current colour written
+      // once, so nothing they show can shift again later.
+      async function freezeColours(rows) {
+        if (!("colour" in rows[0])) { hasExtraColumns.current = false; return; }
+        if (colourFreezeRan.current) return;
+        colourFreezeRan.current = true;
+        const missing = rows.filter(r => !r.colour);
+        if (!missing.length) return;
+        const assigned = assignPostColours(rows);
+        const results = await Promise.all(missing.map(r =>
+          db.from("entries").update({ colour: assigned.get(r.id).name }).eq("id", r.id)));
+        const ok = new Set(missing.filter((r, i) => !results[i].error).map(r => r.id));
+        setEntries(prev => prev.map(e => ok.has(e.id) && !e.colour ? { ...e, colour: assigned.get(e.id).name } : e));
+      }
+
+      function stopWatching() {
+        if (geoWatch.current) { geoWatch.current(); geoWatch.current = null; }
+      }
+      useEffect(() => stopWatching, []);
+
+      async function labelFor(lat, lng, acc) {
+        const seq = ++geoSeq.current;
+        try {
+          const label = await reverseGeocode(lat, lng, acc);
+          if (seq === geoSeq.current) setLocation(label || coordLabel(lat, lng));
+        } catch {
+          if (seq === geoSeq.current) setLocation(coordLabel(lat, lng));
+        }
+      }
+
+      // One getCurrentPosition call often returns the phone's first, coarse
+      // network fix (hundreds of metres out). Watching with high accuracy for a
+      // few seconds lets GPS settle; the best fix wins.
       function getLocation() {
         if (!navigator.geolocation) { setLocation("Geolocation not supported"); return; }
+        stopWatching();
         setLocLoading(true);
-        navigator.geolocation.getCurrentPosition(
-          async pos => {
-            const { latitude, longitude } = pos.coords;
-            try {
-              const res = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
-                { headers: { "Accept-Language": "en" } }
-              );
-              const data = await res.json();
-              const addr = data.address;
-              const place = addr.suburb || addr.neighbourhood || addr.quarter || addr.city_district || addr.city || addr.town || addr.village || "";
-              const city = addr.city || addr.town || addr.county || "";
-              setLocation(place && city && place !== city ? `${place}, ${city}` : place || city || `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`);
-            } catch { setLocation(`${latitude.toFixed(3)}, ${longitude.toFixed(3)}`); }
-            setLocLoading(false);
+        let best = null;
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          stopWatching();
+          setLocLoading(false);
+          if (best) labelFor(best.lat, best.lng, best.acc);
+          else setLocation("Could not get location");
+        };
+        const id = navigator.geolocation.watchPosition(
+          pos => {
+            const fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) };
+            if (!best || fix.acc < best.acc) { best = fix; setCoords(fix); }
+            if (fix.acc <= 20) finish();
           },
           err => {
-            setLocation(err.code === 1 ? "Location access denied" : "Could not get location");
-            setLocLoading(false);
+            if (err.code === 1) { done = true; stopWatching(); setLocLoading(false); setLocation("Location access denied"); }
           },
-          { timeout: 10000, maximumAge: 60000 }
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
         );
+        const timer = setTimeout(finish, 12000);
+        geoWatch.current = () => { navigator.geolocation.clearWatch(id); clearTimeout(timer); };
+      }
+
+      function movePin(lat, lng) {
+        stopWatching();
+        setLocLoading(false);
+        setCoords({ lat, lng, acc: null });
+        labelFor(lat, lng, null);
+      }
+
+      function clearPin() {
+        stopWatching();
+        geoSeq.current++;
+        setLocLoading(false);
+        setCoords(null);
       }
 
       function startCompose() {
         setEditingEntry(null);
         setDraftId(newId());
-        setText(""); setLocation(""); setTags([]);
+        setText(""); setLocation(""); setTags([]); clearPin();
         setView("write");
         setTimeout(() => textRef.current?.focus(), 80);
       }
@@ -1250,6 +1424,8 @@
         setText(entry.text);
         setLocation(entry.location || "");
         setTags(entry.tags || []);
+        clearPin();
+        if (entry.lat != null && entry.lng != null) setCoords({ lat: entry.lat, lng: entry.lng, acc: entry.accuracy ?? null });
         setView("write");
         setTimeout(() => textRef.current?.focus(), 80);
       }
@@ -1257,32 +1433,49 @@
       function cancelEdit() {
         setEditingEntry(null);
         setDraftId(null);
-        setText(""); setLocation(""); setTags([]);
+        setText(""); setLocation(""); setTags([]); clearPin();
         setView("log");
       }
 
       async function addEntry() {
         if (!text.trim() || saving) return;
         setSaving(true);
+        stopWatching();
         const payload = { text: text.trim(), location: location.trim(), tags };
+        const extras = coords
+          ? { lat: coords.lat, lng: coords.lng, accuracy: coords.acc }
+          : { lat: null, lng: null, accuracy: null };
+        // Retry without the new columns if the migration hasn't been run, so
+        // saving never breaks; colour then falls back to the computed one.
+        async function write(build) {
+          let res = hasExtraColumns.current ? await build(true) : { error: { message: "column" } };
+          if (res.error && /column|schema cache/i.test(res.error.message || "")) {
+            hasExtraColumns.current = false;
+            res = await build(false);
+          }
+          return res;
+        }
         if (editingEntry) {
-          const { data, error } = await db
-            .from("entries").update(payload).eq("id", editingEntry.id)
-            .select().single();
-          if (!error && data) setEntries(prev => prev.map(e => e.id === data.id ? data : e));
+          const { data, error } = await write(full => db
+            .from("entries").update(full ? { ...payload, ...extras } : payload).eq("id", editingEntry.id)
+            .select().single());
+          if (error) { setSaving(false); alert("Could not save: " + error.message); return; }
+          if (data) setEntries(prev => prev.map(e => e.id === data.id ? data : e));
           setEditingEntry(null);
         } else {
-          const { data, error } = await db
-            .from("entries")
-            .insert({ ...payload, id: draftId || newId(), timestamp: new Date().toISOString() })
-            .select().single();
-          if (!error && data) {
+          const base = { ...payload, id: draftId || newId(), timestamp: new Date().toISOString() };
+          const colour = draftColour ? draftColour.name : null;
+          const { data, error } = await write(full => db
+            .from("entries").insert(full ? { ...base, ...extras, colour } : base)
+            .select().single());
+          if (error) { setSaving(false); alert("Could not save: " + error.message); return; }
+          if (data) {
             setEntries(prev => [data, ...prev]);
             setJustAdded(data.id);
             setTimeout(() => setJustAdded(null), 2000);
           }
         }
-        setText(""); setLocation(""); setTags([]); setDraftId(null); setView("log"); setSaving(false);
+        setText(""); setLocation(""); setTags([]); clearPin(); setDraftId(null); setView("log"); setSaving(false);
       }
 
       // Two-step inline confirm rather than window.confirm — a system modal is
@@ -1499,9 +1692,21 @@
                   placeholder="Location (optional)"
                 />
                 <button className="loc-btn" onClick={getLocation} disabled={locLoading}>
-                  {locLoading ? "Locating..." : "Use GPS"}
+                  {locLoading ? "Locating..." : coords ? "Refresh GPS" : "Use GPS"}
                 </button>
               </div>
+              {coords && (
+                <>
+                  <LocationMap coords={coords} onMove={movePin} />
+                  <div className="loc-meta">
+                    <span>
+                      {coords.acc != null ? `GPS ±${coords.acc} m` : "Pin set by hand"}
+                      {locLoading ? " · improving..." : " · tap or drag to adjust"}
+                    </span>
+                    <button className="text-btn" onClick={clearPin}>remove pin</button>
+                  </div>
+                </>
+              )}
               <TagInput tags={tags} setTags={setTags} suggestions={allTags} />
               <button className="solid-btn" onClick={addEntry} disabled={!text.trim() || saving}>
                 {saving ? "Saving..." : editingEntry ? "Save changes" : "Log it"}
@@ -1610,7 +1815,14 @@
                         <div className="post-time">{formatTime(new Date(entry.timestamp))}</div>
                         <div className="post-text">{renderText(entry.text)}</div>
                         <div className="post-meta">
-                          {entry.location && <span className="post-loc">{entry.location}</span>}
+                          {entry.location && (
+                            <span className="post-loc">
+                              {entry.lat != null && entry.lng != null ? (
+                                <a href={`https://www.openstreetmap.org/?mlat=${entry.lat}&mlon=${entry.lng}#map=17/${entry.lat}/${entry.lng}`}
+                                  target="_blank" rel="noopener noreferrer">{entry.location}</a>
+                              ) : entry.location}
+                            </span>
+                          )}
                           {(entry.tags || []).map(tag => (
                             <button key={tag} className="post-tag" onClick={() => filterByTag(tag)}>#{tag}</button>
                           ))}
