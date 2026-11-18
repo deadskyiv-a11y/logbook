@@ -87,6 +87,31 @@ module.exports = async function handler(req, res) {
     res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ error: "lat and lng required" }));
   }
+  // TEMP DIAGNOSTIC: ?probe=photon
+  if (url.searchParams.get("probe")) {
+    const at = "lat=" + lat + "&lon=" + lng;
+    const urls = {
+      photon_reverse: "https://photon.komoot.io/reverse?" + at + "&limit=20&radius=0.2&lang=en",
+      photon_reverse_nohw: "https://photon.komoot.io/reverse?" + at + "&limit=20&radius=0.2&lang=en&osm_tag=!highway",
+      nominatim: "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&" + at,
+    };
+    const report = {};
+    await Promise.all(Object.entries(urls).map(async ([k, u]) => {
+      const t0 = Date.now();
+      try {
+        const r = await fetch(u, { headers: { "User-Agent": "logbook-journal/1.0 (personal journal app)" }, signal: AbortSignal.timeout(15000) });
+        const txt = await r.text();
+        let j; try { j = JSON.parse(txt); } catch { j = txt.slice(0, 300); }
+        if (j && j.features) j = j.features.map(f => ({ name: f.properties.name, key: f.properties.osm_key, val: f.properties.osm_value,
+          street: f.properties.street, district: f.properties.district, locality: f.properties.locality, city: f.properties.city,
+          lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] }));
+        report[k] = { status: r.status, ms: Date.now() - t0, data: j };
+      } catch (e) { report[k] = { ms: Date.now() - t0, error: String(e.message || e) }; }
+    }));
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    return res.end(JSON.stringify(report, null, 1));
+  }
   // TEMP DIAGNOSTIC: ?debug=1 times each query part on each server.
   if (url.searchParams.get("debug")) {
     const at = lat.toFixed(5) + "," + lng.toFixed(5);
