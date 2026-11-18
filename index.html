@@ -303,6 +303,10 @@
       width: 16px; height: 16px; border-radius: 50%;
       background: #0e0e10; border: 3px solid #ffffff; box-shadow: 0 0 0 1px #0e0e10;
     }
+    .nearby { margin-top: var(--s4); }
+    .nearby-chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+    .nearby-dist { opacity: 0.6; margin-left: 2px; }
+    .write-band .chip.on { background: var(--band-ink); color: var(--band); border-color: var(--band-ink); }
     .post-loc a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
     .tag-block { margin-top: var(--s5); margin-bottom: var(--s7); position: relative; }
     .tag-input { font-size: var(--t-meta); padding: var(--s1) 0 5px; margin-top: var(--s2); }
@@ -821,28 +825,93 @@
 
     /* ─────────────────────────  Location  ───────────────────────── */
 
-    // Nominatim at zoom 18 returns the nearest building or place. A named
-    // venue (hotel, church, shop) is the most useful label when the fix is
-    // tight; otherwise fall back to neighbourhood, then town.
+    // Two sources, asked in parallel:
+    //  - Nominatim gives the street and neighbourhood under the pin.
+    //  - Overpass lists named places (hotels, shops, churches, offices...)
+    //    within NEARBY_RADIUS metres. Nominatim alone only reports the single
+    //    nearest object, which is often an unnamed building or a road, so a
+    //    venue next to you rarely made it into the label.
+    // The label is the most specific thing found: a venue close to the pin,
+    // else the street, then the neighbourhood.
     const POI_CATEGORIES = ["amenity", "tourism", "leisure", "shop", "office", "building", "historic", "craft"];
-    function placeLabel(data, accuracy) {
+    const NEARBY_RADIUS = 80;
+
+    function addressParts(data) {
       const a = (data && data.address) || {};
       const area = a.neighbourhood || a.suburb || a.quarter || a.residential || a.hamlet ||
         a.village || a.city_district || a.town || a.city || "";
       const city = a.city || a.town || a.municipality || a.county || a.state || "";
-      const poi = data && data.name && POI_CATEGORIES.includes(data.category) &&
-        (accuracy == null || accuracy <= 60) ? data.name : "";
-      const parts = [];
-      [poi, area, city].forEach(x => { if (x && !parts.includes(x)) parts.push(x); });
-      return parts.slice(0, 2).join(", ");
+      const road = a.road || a.pedestrian || a.footway || a.path || "";
+      const street = road ? (a.house_number ? a.house_number + " " + road : road) : "";
+      const poi = data && data.name && POI_CATEGORIES.includes(data.category) ? data.name : "";
+      return { area, city, street, poi };
     }
 
-    async function reverseGeocode(lat, lng, accuracy) {
+    function joinLabel(...xs) {
+      const out = [];
+      xs.forEach(x => { if (x && !out.includes(x)) out.push(x); });
+      return out.slice(0, 2).join(", ");
+    }
+
+    // How close a venue must be to name the spot after it. A hand-placed pin is
+    // trusted to ~30 m; a GPS fix only to its own accuracy, within 25–60 m.
+    function venueRadius(accuracy) {
+      return accuracy == null ? 30 : Math.min(60, Math.max(25, accuracy));
+    }
+
+    function pickLabel(parts, nearby, accuracy) {
+      const r = venueRadius(accuracy);
+      const close = nearby.find(p => p.dist <= r);
+      const poi = parts.poi && (accuracy == null || accuracy <= 60) ? parts.poi : "";
+      const spot = (close && close.name) || poi || parts.street;
+      return joinLabel(spot, parts.area, parts.city);
+    }
+
+    function metresBetween(lat1, lng1, lat2, lng2) {
+      const R = 6371000, rad = Math.PI / 180;
+      const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    // Overpass elements -> [{ name, dist }], nearest first, one per name.
+    function rankNearby(elements, lat, lng) {
+      const seen = new Set();
+      return (elements || [])
+        .map(e => {
+          const at = e.center || e;
+          if (!e.tags || !e.tags.name || at.lat == null) return null;
+          return { name: e.tags.name, dist: Math.round(metresBetween(lat, lng, at.lat, at.lon)) };
+        })
+        .filter(Boolean)
+        .sort((x, y) => x.dist - y.dist)
+        .filter(p => (seen.has(p.name) ? false : (seen.add(p.name), true)))
+        .slice(0, 6);
+    }
+
+    async function reverseGeocode(lat, lng) {
       const url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1" +
         "&accept-language=en&lat=" + lat + "&lon=" + lng;
       const res = await fetch(url);
       if (!res.ok) throw new Error("geocode " + res.status);
-      return placeLabel(await res.json(), accuracy);
+      return addressParts(await res.json());
+    }
+
+    async function nearbyPlaces(lat, lng) {
+      const around = "(around:" + NEARBY_RADIUS + "," + lat + "," + lng + ")";
+      const q = "[out:json][timeout:8];(" +
+        POI_CATEGORIES.concat(["place"]).map(k => 'nwr' + around + '["name"]["' + k + '"];').join("") +
+        ");out center tags 40;";
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 9000);
+      try {
+        const res = await fetch("https://overpass-api.de/api/interpreter", {
+          method: "POST", body: "data=" + encodeURIComponent(q), signal: ctrl.signal,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        });
+        if (!res.ok) throw new Error("overpass " + res.status);
+        return rankNearby((await res.json()).elements, lat, lng);
+      } finally { clearTimeout(t); }
     }
 
     function coordLabel(lat, lng) { return lat.toFixed(5) + ", " + lng.toFixed(5); }
@@ -934,10 +1003,23 @@
         existing.every(e => before.get(e.id).bg === after.get(e.id).bg));
       ok("a stored colour always wins",
         assignPostColours([mk("x", 0, "Emerald")]).get("x").name === "Emerald");
-      ok("placeLabel prefers a venue on a tight fix",
-        placeLabel({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }, 20) === "Raybow, Anaji");
-      ok("placeLabel drops the venue on a loose fix",
-        placeLabel({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }, 500) === "Anaji, Takoradi");
+      const parts = addressParts({ name: "", category: "highway",
+        address: { road: "Liberation Road", house_number: "12", suburb: "Osu", city: "Accra" } });
+      ok("label falls back to the street", pickLabel(parts, [], 15) === "12 Liberation Road, Osu");
+      ok("label uses a venue beside the pin",
+        pickLabel(parts, [{ name: "Raybow", dist: 18 }], null) === "Raybow, Osu");
+      ok("label ignores a venue too far for the fix",
+        pickLabel(parts, [{ name: "Raybow", dist: 70 }], 15) === "12 Liberation Road, Osu");
+      ok("label drops a geocoder venue on a loose fix",
+        pickLabel(addressParts({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }), [], 500) === "Anaji, Takoradi");
+      const ranked = rankNearby([
+        { type: "node", lat: 5.5561, lon: -0.1820, tags: { name: "Far" } },
+        { type: "way", center: { lat: 5.55601, lon: -0.18201 }, tags: { name: "Near" } },
+        { type: "node", lat: 5.55602, lon: -0.18202, tags: { name: "Near" } },
+        { type: "node", lat: 5.5560, lon: -0.1820, tags: {} },
+      ], 5.5560, -0.1820);
+      ok("nearby is nearest first, deduped, unnamed dropped",
+        ranked.map(p => p.name).join() === "Near,Far" && ranked[0].dist <= 2 && ranked[1].dist === 11);
       // August 2026 starts on a Saturday, so Monday-first needs five blanks.
       const aug = monthGrid(2026, 7);
       ok("monthGrid pads to whole weeks", aug.length % 7 === 0);
@@ -1179,6 +1261,9 @@
       const geoSeq = useRef(0);
       // Flips to false if the database hasn't had the colour/coords migration.
       const hasExtraColumns = useRef(true);
+      // Named places near the pin, offered as one-tap labels, plus the area
+      // name to pair them with.
+      const [nearby, setNearby] = useState({ list: [], area: "" });
       const colourFreezeRan = useRef(false);
       const [now, setNow] = useState(new Date());
       const [justAdded, setJustAdded] = useState(null);
@@ -1356,12 +1441,13 @@
 
       async function labelFor(lat, lng, acc) {
         const seq = ++geoSeq.current;
-        try {
-          const label = await reverseGeocode(lat, lng, acc);
-          if (seq === geoSeq.current) setLocation(label || coordLabel(lat, lng));
-        } catch {
-          if (seq === geoSeq.current) setLocation(coordLabel(lat, lng));
-        }
+        setNearby({ list: [], area: "" });
+        const [geo, places] = await Promise.allSettled([reverseGeocode(lat, lng), nearbyPlaces(lat, lng)]);
+        if (seq !== geoSeq.current) return;
+        const parts = geo.status === "fulfilled" ? geo.value : { area: "", city: "", street: "", poi: "" };
+        const list = places.status === "fulfilled" ? places.value : [];
+        setNearby({ list, area: parts.area || parts.city });
+        setLocation(pickLabel(parts, list, acc) || coordLabel(lat, lng));
       }
 
       // One getCurrentPosition call often returns the phone's first, coarse
@@ -1408,6 +1494,7 @@
         geoSeq.current++;
         setLocLoading(false);
         setCoords(null);
+        setNearby({ list: [], area: "" });
       }
 
       function startCompose() {
@@ -1705,6 +1792,22 @@
                     </span>
                     <button className="text-btn" onClick={clearPin}>remove pin</button>
                   </div>
+                  {nearby.list.length > 0 && (
+                    <div className="nearby">
+                      <span className="micro-label">Nearby</span>
+                      <div className="nearby-chips">
+                        {nearby.list.map(p => {
+                          const label = joinLabel(p.name, nearby.area);
+                          return (
+                            <button key={p.name} className={`chip ${location === label ? "on" : ""}`}
+                              onClick={() => setLocation(label)}>
+                              {p.name} <span className="nearby-dist">{p.dist} m</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
               <TagInput tags={tags} setTags={setTags} suggestions={allTags} />
