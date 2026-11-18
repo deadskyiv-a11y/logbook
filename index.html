@@ -828,25 +828,15 @@
     // Three sources:
     //  - Your own past entries. A label you saved within a few dozen metres
     //    wins outright, and the area you've used nearby is reused. Correct a
-    //    spot once and it stays correct.
-    //  - Nominatim: street and a best-guess neighbourhood under the pin. Its
-    //    neighbourhood is often wrong where OSM areas are sparse.
-    //  - Overpass: named places around the pin, plus the named areas that
-    //    actually contain it (is_in), which beats Nominatim's guess.
-    // Nominatim answers first and sets a label; Overpass refines it if you
-    // haven't typed in the field since.
+    //    spot once and it stays correct. This is the only way to get an area
+    //    OpenStreetMap doesn't have (Beachwood, Takoradi isn't in it).
+    //  - Nominatim: street and suburb under the pin.
+    //  - Photon, via /api/places: named places within ~150 m, each tagged
+    //    with its district.
+    // Nominatim answers first and sets a label; Photon refines it if you
+    // haven't typed in the field or tapped a suggestion since.
     const POI_CATEGORIES = ["amenity", "tourism", "leisure", "shop", "office", "building", "historic", "craft"];
-    const VENUE_RADIUS = 120;
-    const AREA_RADIUS = 2000;
-    const OVERPASS_SERVERS = [
-      "https://overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter",
-      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-    ];
-    // Smaller areas first. A residential estate beats the suburb around it.
-    const AREA_RANK = { neighbourhood: 0, residential: 1, quarter: 2, suburb: 3, hamlet: 4, village: 5 };
-    // Named things that are not places you'd be "at".
-    const NOT_VENUE = ["highway", "boundary", "route", "railway", "waterway", "place", "landuse", "natural", "power", "barrier", "admin_level"];
+    const VENUE_RADIUS = 150;
     const EMPTY_PARTS = { area: "", city: "", street: "", poi: "" };
 
     function addressParts(data) {
@@ -884,35 +874,19 @@
       return list.filter(p => (seen.has(p.name) ? false : (seen.add(p.name), true)));
     }
 
-    // Overpass elements -> { venues, areas }. Venues nearest first; areas
-    // are those containing the pin (inside: true, smallest first), then
-    // nearby area names by distance.
-    function parseOverpass(elements, lat, lng) {
-      const venues = [], inside = [], around = [];
-      (elements || []).forEach(e => {
-        const t = e.tags || {};
-        if (!t.name) return;
-        if (e.type === "area") {
-          const kind = t.place || (t.landuse === "residential" ? "residential" : "");
-          if (kind in AREA_RANK) inside.push({ name: t.name, rank: AREA_RANK[kind], inside: true });
-          return;
-        }
-        const at = e.center || e;
-        if (at.lat == null) return;
-        const dist = Math.round(metresBetween(lat, lng, at.lat, at.lon));
-        if (t.place) {
-          if (t.place in AREA_RANK && dist <= AREA_RADIUS) around.push({ name: t.name, dist });
-          return;
-        }
-        if (NOT_VENUE.some(k => k in t)) return;
-        if (dist <= VENUE_RADIUS) venues.push({ name: t.name, dist });
+    // /api/places rows -> { venues, areas }. Venues nearest first. Areas are
+    // the districts those places are filed under, nearest first.
+    function parsePlaces(places, lat, lng) {
+      const venues = [], areas = [];
+      (places || []).forEach(p => {
+        if (!p.name || p.lat == null) return;
+        const dist = Math.round(metresBetween(lat, lng, p.lat, p.lng));
+        if (dist <= VENUE_RADIUS) venues.push({ name: p.name, dist, district: p.district || "" });
+        if (p.district) areas.push({ name: p.district, dist });
       });
       return {
         venues: uniqueByName(venues.sort((a, b) => a.dist - b.dist)).slice(0, 8),
-        areas: uniqueByName([
-          ...inside.sort((a, b) => a.rank - b.rank),
-          ...around.sort((a, b) => a.dist - b.dist),
-        ]).slice(0, 5),
+        areas: uniqueByName(areas.sort((a, b) => a.dist - b.dist)).slice(0, 4),
       };
     }
 
@@ -949,8 +923,8 @@
       const close = venues.find(p => p.dist <= r);
       const poi = parts.poi && (accuracy == null || accuracy <= 60) ? parts.poi : "";
       const spot = (close && close.name) || poi || parts.street;
-      const container = areas.find(a => a.inside);
-      const area = myArea || (container && container.name) || parts.area || parts.city;
+      // A venue's own district keeps the label consistent with the map's data.
+      const area = myArea || (close && spot === close.name && close.district) || parts.area || (areas[0] && areas[0].name) || parts.city;
       return { spot, area, label: joinLabel(spot, area, parts.city) };
     }
 
@@ -962,34 +936,17 @@
       return addressParts(await res.json());
     }
 
-    // Public Overpass servers are often busy. Ask the main one first, then a
-    // mirror every 4 s until one answers; the rest are cancelled.
+    // Nearby places come from /api/places, a function on this same Vercel
+    // site that asks Photon and logs failures to the runtime logs.
     async function nearbyPlaces(lat, lng) {
-      const q = "[out:json][timeout:12];is_in(" + lat + "," + lng + ")->.a;(" +
-        "nwr(around:" + VENUE_RADIUS + "," + lat + "," + lng + ")[\"name\"];" +
-        "nwr(around:" + AREA_RADIUS + "," + lat + "," + lng + ")[\"place\"~\"^(neighbourhood|quarter|suburb|hamlet|village)$\"][\"name\"];" +
-        "area.a[\"place\"][\"name\"];area.a[\"landuse\"=\"residential\"][\"name\"];" +
-        ");out center tags;";
-      const ctrls = OVERPASS_SERVERS.map(() => new AbortController());
-      let settled = false;
-      const attempt = (url, i) => new Promise((resolve, reject) => {
-        const go = async () => {
-          if (settled) return reject(new Error("skipped"));
-          const t = setTimeout(() => ctrls[i].abort(), 15000);
-          try {
-            const res = await fetch(url + "?data=" + encodeURIComponent(q), { signal: ctrls[i].signal });
-            if (!res.ok) throw new Error("overpass " + res.status);
-            resolve(parseOverpass((await res.json()).elements, lat, lng));
-          } catch (err) { reject(err); } finally { clearTimeout(t); }
-        };
-        setTimeout(go, i * 4000);
-      });
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 20000);
       try {
-        return await Promise.any(OVERPASS_SERVERS.map(attempt));
-      } finally {
-        settled = true;
-        ctrls.forEach(c => c.abort());
-      }
+        const res = await fetch("/api/places?lat=" + lat.toFixed(5) + "&lng=" + lng.toFixed(5), { signal: ctrl.signal });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !Array.isArray(body.places)) throw new Error(body.error || "HTTP " + res.status);
+        return parsePlaces(body.places, lat, lng);
+      } finally { clearTimeout(t); }
     }
 
     function coordLabel(lat, lng) { return lat.toFixed(5) + ", " + lng.toFixed(5); }
@@ -1086,29 +1043,32 @@
       const L = o => chooseLabel({ parts, venues: [], areas: [], remembered: [], myArea: "", accuracy: 15, ...o }).label;
       ok("label falls back to the street", L({}) === "12 Liberation Road, Osu");
       ok("label uses a venue beside the pin", L({ venues: [{ name: "Raybow", dist: 18 }], accuracy: null }) === "Raybow, Osu");
+      ok("a venue brings its own district",
+        L({ venues: [{ name: "Agyeiwah Apartments", dist: 10, district: "Dixcove Hill" }] }) === "Agyeiwah Apartments, Dixcove Hill");
+      ok("your own area beats a venue's district",
+        L({ myArea: "Beachwood", venues: [{ name: "Agyeiwah Apartments", dist: 10, district: "Dixcove Hill" }] }) === "Agyeiwah Apartments, Beachwood");
       ok("label ignores a venue too far for the fix", L({ venues: [{ name: "Raybow", dist: 70 }] }) === "12 Liberation Road, Osu");
-      ok("containing area beats the geocoder's guess",
-        L({ areas: [{ name: "Beachwood", inside: true }, { name: "Chapel Hill", dist: 300 }] }) === "12 Liberation Road, Beachwood");
-      ok("a nearby (not containing) area does not override", L({ areas: [{ name: "Chapel Hill", dist: 300 }] }) === "12 Liberation Road, Osu");
-      ok("your own area beats everything", L({ myArea: "Beachwood", areas: [{ name: "X", inside: true }] }) === "12 Liberation Road, Beachwood");
+      ok("geocoder suburb is used when you have no area of your own",
+        L({ areas: [{ name: "Dixcove Hill", dist: 40 }] }) === "12 Liberation Road, Osu");
+      ok("nearby district fills in when the geocoder has no suburb",
+        chooseLabel({ parts: { ...parts, area: "" }, venues: [], areas: [{ name: "Dixcove Hill", dist: 40 }], remembered: [], myArea: "", accuracy: 15 }).label
+          === "12 Liberation Road, Dixcove Hill");
+      ok("your own area beats everything", L({ myArea: "Beachwood", areas: [{ name: "X", dist: 5 }] }) === "12 Liberation Road, Beachwood");
       ok("your saved label for this spot wins", L({ remembered: [{ name: "Home, Beachwood", dist: 10 }], venues: [{ name: "Raybow", dist: 5 }] }) === "Home, Beachwood");
       ok("label drops a geocoder venue on a loose fix",
         chooseLabel({ parts: addressParts({ name: "Raybow", category: "tourism", address: { suburb: "Anaji", city: "Takoradi" } }),
           venues: [], areas: [], remembered: [], myArea: "", accuracy: 500 }).label === "Anaji, Takoradi");
-      const op = parseOverpass([
-        { type: "node", lat: 5.5561, lon: -0.1820, tags: { name: "Far", amenity: "cafe" } },
-        { type: "way", center: { lat: 5.55601, lon: -0.18201 }, tags: { name: "Near", building: "apartments" } },
-        { type: "node", lat: 5.55602, lon: -0.18202, tags: { name: "Near" } },
-        { type: "node", lat: 5.5560, lon: -0.1820, tags: {} },
-        { type: "way", center: { lat: 5.5560, lon: -0.1820 }, tags: { name: "Ring Road", highway: "primary" } },
-        { type: "node", lat: 5.5590, lon: -0.1820, tags: { name: "Chapel Hill", place: "suburb" } },
-        { type: "area", tags: { name: "Beachwood", landuse: "residential" } },
-        { type: "area", tags: { name: "Takoradi", place: "city" } },
-      ], 5.5560, -0.1820);
-      ok("venues nearest first, deduped, roads and unnamed dropped",
-        op.venues.map(p => p.name).join() === "Near,Far" && op.venues[0].dist <= 2 && op.venues[1].dist === 11);
-      ok("areas: containing first, then nearby; cities skipped",
-        op.areas.map(a => a.name).join() === "Beachwood,Chapel Hill" && op.areas[0].inside === true);
+      // Shape is what /api/places returns (real Photon data near Africana Roundabout).
+      const op = parsePlaces([
+        { name: "Mercy Lodge", lat: 4.8852405, lng: -1.7636892, district: "Chapel Hill" },
+        { name: "Raybow International Hotel", lat: 4.8843217, lng: -1.7637006, district: "Dixcove Hill" },
+        { name: "Agyeiwah Apartments", lat: 4.8841495, lng: -1.7642535, district: "Dixcove Hill" },
+        { name: "Raybow International Hotel", lat: 4.8843300, lng: -1.7637100, district: "Dixcove Hill" },
+        { name: "MTN Service Centre", lat: 4.8860395, lng: -1.7624876, district: "Chapel Hill" },
+      ], 4.88440, -1.76380);
+      ok("venues nearest first, deduped, far ones dropped",
+        op.venues.map(p => p.name).join() === "Raybow International Hotel,Agyeiwah Apartments,Mercy Lodge");
+      ok("areas are districts, nearest first", op.areas.map(a => a.name).join() === "Dixcove Hill,Chapel Hill");
       const past = [
         { location: "Home, Beachwood", lat: 5.5561, lng: -0.1820 },
         { location: "Shop, Beachwood", lat: 5.5580, lng: -0.1820 },
@@ -1360,10 +1320,10 @@
       const hasExtraColumns = useRef(true);
       // Named places near the pin, offered as one-tap labels, plus the area
       // name to pair them with.
-      const NO_NEARBY = { status: "idle", venues: [], areas: [], remembered: [], spot: "", area: "" };
+      const NO_NEARBY = { status: "idle", venues: [], areas: [], remembered: [], myArea: "", spot: "", area: "" };
       const [nearby, setNearby] = useState(NO_NEARBY);
       // Set once you type in the location field or tap a suggestion, so a
-      // slow Overpass answer never overwrites your choice.
+      // slow nearby-places answer never overwrites your choice.
       const userPicked = useRef(false);
       const lastFix = useRef(null);
       const colourFreezeRan = useRef(false);
@@ -1551,7 +1511,7 @@
         const apply = () => {
           if (seq !== geoSeq.current) return;
           const pick = chooseLabel({ parts, ...places, remembered, myArea, accuracy: acc });
-          setNearby({ status, ...places, remembered, spot: pick.spot, area: pick.area });
+          setNearby({ status, ...places, remembered, myArea, spot: pick.spot, area: pick.area });
           if (!userPicked.current) setLocation(pick.label || coordLabel(lat, lng));
         };
         apply();
@@ -1933,10 +1893,11 @@
                       <span className="micro-label">Nearby places</span>
                       <div className="nearby-chips">
                         {nearby.venues.map(p => {
-                          const label = joinLabel(p.name, nearby.area);
+                          const area = nearby.myArea || p.district || nearby.area;
+                          const label = joinLabel(p.name, area);
                           return (
                             <button key={p.name} className={`chip ${location === label ? "on" : ""}`}
-                              onClick={() => pickSuggestion(label, { spot: p.name })}>
+                              onClick={() => pickSuggestion(label, { spot: p.name, area })}>
                               {p.name} <span className="nearby-dist">{p.dist} m</span>
                             </button>
                           );
@@ -1954,7 +1915,7 @@
                             <button key={a.name} className={`chip ${nearby.area === a.name && location === label ? "on" : ""}`}
                               onClick={() => pickSuggestion(label, { area: a.name })}>
                               {a.name}
-                              <span className="nearby-dist">{a.inside ? "you're in it" : `${(a.dist / 1000).toFixed(1)} km`}</span>
+                              <span className="nearby-dist">{a.dist < 1000 ? `${a.dist} m` : `${(a.dist / 1000).toFixed(1)} km`}</span>
                             </button>
                           );
                         })}
