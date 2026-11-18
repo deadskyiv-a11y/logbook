@@ -90,7 +90,11 @@ module.exports = async function handler(req, res) {
   // TEMP DIAGNOSTIC: ?probe=photon
   if (url.searchParams.get("probe")) {
     const at = "lat=" + lat + "&lon=" + lng;
-    const urls = {
+    const q = url.searchParams.get("q");
+    const urls = q ? {
+      photon_search: "https://photon.komoot.io/api/?q=" + encodeURIComponent(q) + "&limit=8&lang=en&lat=4.90&lon=-1.76",
+      nominatim_search: "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&countrycodes=gh&q=" + encodeURIComponent(q),
+    } : {
       photon_reverse: "https://photon.komoot.io/reverse?" + at + "&limit=20&radius=0.2&lang=en",
       photon_reverse_nohw: "https://photon.komoot.io/reverse?" + at + "&limit=20&radius=0.2&lang=en&osm_tag=!highway",
       nominatim: "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&" + at,
@@ -102,6 +106,7 @@ module.exports = async function handler(req, res) {
         const r = await fetch(u, { headers: { "User-Agent": "logbook-journal/1.0 (personal journal app)" }, signal: AbortSignal.timeout(15000) });
         const txt = await r.text();
         let j; try { j = JSON.parse(txt); } catch { j = txt.slice(0, 300); }
+        if (Array.isArray(j)) j = j.map(x => ({ name: x.name, cat: x.category + "/" + x.type, lat: x.lat, lon: x.lon, display: x.display_name }));
         if (j && j.features) j = j.features.map(f => ({ name: f.properties.name, key: f.properties.osm_key, val: f.properties.osm_value,
           street: f.properties.street, district: f.properties.district, locality: f.properties.locality, city: f.properties.city,
           lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] }));
