@@ -1,5 +1,5 @@
 {
   "functions": {
-    "api/places.js": { "maxDuration": 60 }
+    "api/places.js": { "maxDuration": 30 }
   }
 }
