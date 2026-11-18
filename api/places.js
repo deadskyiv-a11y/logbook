@@ -87,6 +87,34 @@ module.exports = async function handler(req, res) {
     res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ error: "lat and lng required" }));
   }
+  // TEMP DIAGNOSTIC: ?debug=1 times each query part on each server.
+  if (url.searchParams.get("debug")) {
+    const at = lat.toFixed(5) + "," + lng.toFixed(5);
+    const parts = {
+      trivial: "[out:json][timeout:5];node(1);out ids;",
+      venues: "[out:json][timeout:20];nwr(around:" + VENUE_RADIUS + "," + at + ")[\"name\"];out center tags;",
+      places: "[out:json][timeout:20];node(around:" + AREA_RADIUS + "," + at + ")[\"place\"~\"^(neighbourhood|quarter|suburb|hamlet|village)$\"][\"name\"];out tags;",
+      isin: "[out:json][timeout:20];is_in(" + at + ")->.a;(area.a[\"place\"][\"name\"];area.a[\"landuse\"=\"residential\"][\"name\"];);out tags;",
+    };
+    const only = url.searchParams.get("server");
+    const servers = only ? SERVERS.filter(s => s.includes(only)) : SERVERS;
+    const report = [];
+    await Promise.all(servers.flatMap(server => Object.entries(parts).map(async ([name, q]) => {
+      const t0 = Date.now();
+      const c = new AbortController();
+      const timer = setTimeout(() => c.abort(), 25000);
+      try {
+        const el = await ask(server, q, c.signal);
+        report.push({ server: new URL(server).host, part: name, ms: Date.now() - t0, n: el.length,
+          names: el.map(e => (e.tags && e.tags.name ? e.type + ":" + e.tags.name : null)).filter(Boolean).slice(0, 25) });
+      } catch (err) {
+        report.push({ server: new URL(server).host, part: name, ms: Date.now() - t0, error: String(err.message || err).slice(0, 200) });
+      } finally { clearTimeout(timer); }
+    })));
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "no-store");
+    return res.end(JSON.stringify(report, null, 1));
+  }
   // ~1 m precision is plenty and makes repeat lookups cacheable.
   const q = buildQuery(lat.toFixed(5), lng.toFixed(5));
   res.setHeader("Content-Type", "application/json");
